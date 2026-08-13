@@ -629,3 +629,45 @@ paths:
       responses:
         "200":
           description: temporary credentials
+  /api/stats:
+    get:
+      summary: Account capacity stats from object_records
+      responses:
+        "200":
+          description: usage
+  /api/stats/buckets:
+    get:
+      summary: Per-bucket capacity stats
+      responses:
+        "200":
+          description: items
+  /api/stats/traffic:
+    get:
+      summary: Account traffic stats (zeros until access logs)
+      responses:
+        "200":
+          description: zeros
+  /api/stats/buckets/requests:
+    get:
+      summary: Per-bucket request stats (zeros until access logs)
+      responses:
+        "200":
+          description: items
+  /api/audit-logs:
+    get:
+      summary: List tenant audit logs
+      responses:
+        "200":
+          description: page
+  /api/audit-logs/export:
+    get:
+      summary: Export audit logs as CSV
+      responses:
+        "200":
+          description: csv
+  /api/alerts/notifications:
+    get:
+      summary: Open tenant alert notifications
+      responses:
+        "200":
+          description: items

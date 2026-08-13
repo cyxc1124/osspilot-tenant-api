@@ -1,6 +1,7 @@
 package bucket
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -64,7 +65,7 @@ type summary struct {
 	DisplayName       *string `json:"display_name"`
 	DisplayAliasOnly  bool    `json:"display_alias_only"`
 	QuotaBytes        *int64  `json:"quota_bytes"`
-	UsedBytes         int64   `json:"used_bytes"` // ponytail: 0 until T13
+	UsedBytes         int64   `json:"used_bytes"`
 	ObjectCount       int64   `json:"object_count"`
 	Status            string  `json:"status"`
 	VersioningEnabled bool    `json:"versioning_enabled"`
@@ -110,8 +111,17 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request, user *auth.User) 
 		items = filtered
 	}
 	out := make([]summary, 0, len(items))
+	ids := make([]int64, 0, len(items))
 	for _, b := range items {
-		out = append(out, toSummary(b))
+		ids = append(ids, b.ID)
+	}
+	usage, err := h.store.UsageByID(r.Context(), ids)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	for _, b := range items {
+		out = append(out, toSummary(b, usage[b.ID]))
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": out})
 }
@@ -184,7 +194,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 			}
 		}
 	}
-	httpx.JSON(w, http.StatusCreated, toDetail(*b))
+	httpx.JSON(w, http.StatusCreated, toDetail(*b, Usage{}))
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request, user *auth.User) {
@@ -192,7 +202,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request, user *auth.User) {
 	if !ok {
 		return
 	}
-	httpx.JSON(w, http.StatusOK, toDetail(*b))
+	httpx.JSON(w, http.StatusOK, h.detail(r.Context(), *b))
 }
 
 func (h *Handler) update(w http.ResponseWriter, r *http.Request, user *auth.User) {
@@ -251,7 +261,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
-	httpx.JSON(w, http.StatusOK, toDetail(*b))
+	httpx.JSON(w, http.StatusOK, h.detail(r.Context(), *b))
 }
 
 func (h *Handler) remove(w http.ResponseWriter, r *http.Request, user *auth.User) {
@@ -327,19 +337,26 @@ func emptyToNil(s *string) *string {
 	return s
 }
 
-func toSummary(b Bucket) summary {
+func (h *Handler) detail(ctx context.Context, b Bucket) detail {
+	usage, _ := h.store.UsageByID(ctx, []int64{b.ID})
+	return toDetail(b, usage[b.ID])
+}
+
+func toSummary(b Bucket, u Usage) summary {
 	return summary{
 		BucketName:        b.BucketName,
 		DisplayName:       b.DisplayName,
 		DisplayAliasOnly:  b.DisplayAliasOnly,
 		QuotaBytes:        b.QuotaBytes,
+		UsedBytes:         u.UsedBytes,
+		ObjectCount:       u.ObjectCount,
 		Status:            b.Status,
 		VersioningEnabled: b.VersioningEnabled,
 		CreatedAt:         b.CreatedAt.UTC().Format(time.RFC3339),
 	}
 }
 
-func toDetail(b Bucket) detail {
+func toDetail(b Bucket, u Usage) detail {
 	return detail{
 		ID:                    b.ID,
 		BucketName:            b.BucketName,
@@ -347,6 +364,8 @@ func toDetail(b Bucket) detail {
 		DisplayAliasOnly:      b.DisplayAliasOnly,
 		QuotaBytes:            b.QuotaBytes,
 		ObjectLimit:           b.ObjectLimit,
+		UsedBytes:             u.UsedBytes,
+		ObjectCount:           u.ObjectCount,
 		VersioningEnabled:     b.VersioningEnabled,
 		AccessLoggingEnabled:  b.AccessLoggingEnabled,
 		AccessLogTargetBucket: b.AccessLogTargetBucket,

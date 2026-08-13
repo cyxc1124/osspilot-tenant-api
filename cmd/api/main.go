@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/cyxc1124/osspilot-tenant-api/internal/audit"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/config"
@@ -21,6 +22,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/project"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/share"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/stats"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/uploads"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/versions"
@@ -39,6 +41,8 @@ type apiHandlers struct {
 	edit      *edit.Handler
 	rbac      *rbac.Handler
 	creds     *creds.Handler
+	stats     *stats.Handler
+	audit     *audit.Handler
 }
 
 func newMux(h apiHandlers) http.Handler {
@@ -80,6 +84,12 @@ func newMux(h apiHandlers) http.Handler {
 	if h.creds != nil {
 		h.creds.Register(mux)
 	}
+	if h.stats != nil {
+		h.stats.Register(mux)
+	}
+	if h.audit != nil {
+		h.audit.Register(mux)
+	}
 	return httpx.CORS(mux)
 }
 
@@ -104,6 +114,9 @@ func main() {
 	var editStore *edit.Store
 	var rbacStore *rbac.Store
 	var credsStore *creds.Store
+	var statsStore *stats.Store
+	var auditStore *audit.Store
+	var auditLog *audit.Logger
 	if cfg.DatabaseURL != "" {
 		pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
 		if err != nil {
@@ -121,6 +134,9 @@ func main() {
 		editStore = edit.NewStore(pool)
 		rbacStore = rbac.NewStore(pool)
 		credsStore = creds.NewStore(pool)
+		statsStore = stats.NewStore(pool)
+		auditStore = audit.NewStore(pool)
+		auditLog = audit.NewLogger(pool)
 	} else {
 		slog.Warn("DATABASE_URL unset; auth routes return 503")
 	}
@@ -139,11 +155,11 @@ func main() {
 	}
 
 	authH := auth.NewHandler(authStore, cfg.JWTSecret, cfg.TokenTTL)
-	rbacH := rbac.NewHandler(authStore, rbacStore, bucketStore, authH.RequireUser)
+	rbacH := rbac.NewHandler(authStore, rbacStore, bucketStore, authH.RequireUser, auditLog)
 	ac := rbacH.Checker()
 	bucketH := bucket.NewHandler(bucketStore, authH.RequireUser, s3c, cfg.CORSOrigins, ac)
-	objectH := objects.NewHandler(bucketStore, objectStore, s3c, authH.RequireUser, ac)
-	uploadH := uploads.NewHandler(s3c, bucketStore, objectStore, uploadStore, authH.RequireUser, ac)
+	objectH := objects.NewHandler(bucketStore, objectStore, s3c, authH.RequireUser, ac, auditLog)
+	uploadH := uploads.NewHandler(s3c, bucketStore, objectStore, uploadStore, authH.RequireUser, ac, auditLog)
 	downloadH := downloads.NewHandler(s3c, bucketStore, authH.RequireUser, ac)
 	platformH := platform.NewHandler(settingsStore, authH.RequireUser, platform.Fallbacks{
 		S3Endpoint:        cfg.S3Endpoint,
@@ -154,11 +170,13 @@ func main() {
 	})
 	projectH := project.NewHandler(cfg.ProjectionSecret, authStore, bucketStore)
 	versionH := versions.NewHandler(versionStore, bucketStore, s3c, authH.RequireUser, ac)
-	shareH := share.NewHandler(shareStore, bucketStore, s3c, authH.RequireUser, ac)
+	shareH := share.NewHandler(shareStore, bucketStore, s3c, authH.RequireUser, ac, auditLog)
 	editH := edit.NewHandler(editStore, bucketStore, versionStore, settingsStore, s3c, authH.RequireUser, edit.OfficeEnv{
 		URL: cfg.OfficeURL, JWTSecret: cfg.OfficeJWTSecret, PublicURL: cfg.PublicURL,
 	}, ac)
-	credsH := creds.NewHandler(credsStore, authH.RequireUser, ac, cfg.S3Endpoint, cfg.S3Region, cfg.JWTSecret, bucketStore, objectStore, uploadStore, s3c)
+	credsH := creds.NewHandler(credsStore, authH.RequireUser, ac, cfg.S3Endpoint, cfg.S3Region, cfg.JWTSecret, bucketStore, objectStore, uploadStore, s3c, auditLog)
+	statsH := stats.NewHandler(statsStore, bucketStore, authH.RequireUser, ac)
+	auditH := audit.NewHandler(auditStore, authH.RequireUser, ac)
 	if cfg.ProjectionSecret == "" {
 		slog.Warn("PROJECTION_SECRET unset; internal projection routes return 503")
 	}
@@ -166,7 +184,7 @@ func main() {
 	slog.Info("listen", "addr", addr)
 	if err := http.ListenAndServe(addr, newMux(apiHandlers{
 		auth: authH, bucket: bucketH, objects: objectH, uploads: uploadH, downloads: downloadH,
-		platform: platformH, project: projectH, versions: versionH, share: shareH, edit: editH, rbac: rbacH, creds: credsH,
+		platform: platformH, project: projectH, versions: versionH, share: shareH, edit: editH, rbac: rbacH, creds: credsH, stats: statsH, audit: auditH,
 	})); err != nil {
 		slog.Error("server", "err", err)
 		os.Exit(1)

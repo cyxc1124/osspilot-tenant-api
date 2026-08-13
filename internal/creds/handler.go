@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cyxc1124/osspilot-tenant-api/internal/audit"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
@@ -26,10 +27,11 @@ type Handler struct {
 	objects *objects.Store
 	uploads *uploads.Store
 	s3      *storage.Client
+	log     *audit.Logger
 }
 
-func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, s3Endpoint, s3Region, jwtSecret string, buckets *bucket.Store, objectStore *objects.Store, uploadStore *uploads.Store, s3 *storage.Client) *Handler {
-	return &Handler{store: store, protect: protect, ac: ac, s3End: s3Endpoint, s3Reg: s3Region, secret: jwtSecret, buckets: buckets, objects: objectStore, uploads: uploadStore, s3: s3}
+func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, s3Endpoint, s3Region, jwtSecret string, buckets *bucket.Store, objectStore *objects.Store, uploadStore *uploads.Store, s3 *storage.Client, log *audit.Logger) *Handler {
+	return &Handler{store: store, protect: protect, ac: ac, s3End: s3Endpoint, s3Reg: s3Region, secret: jwtSecret, buckets: buckets, objects: objectStore, uploads: uploadStore, s3: s3, log: log}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -153,6 +155,7 @@ func (h *Handler) requestAccess(w http.ResponseWriter, r *http.Request, user *au
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
+	h.log.Record(r, user, "", "", "request_tenant_api_access", "success", "")
 	httpx.JSON(w, http.StatusOK, accessJSON(accountID, row))
 }
 
@@ -218,6 +221,7 @@ func (h *Handler) createApp(w http.ResponseWriter, r *http.Request, user *auth.U
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
+	h.log.Record(r, user, "", a.Name, "create_application", "success", "")
 	httpx.JSON(w, http.StatusCreated, appJSON(*a))
 }
 
@@ -248,6 +252,7 @@ func (h *Handler) updateApp(w http.ResponseWriter, r *http.Request, user *auth.U
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
+	h.log.Record(r, user, "", updated.Name, "update_application", "success", "")
 	httpx.JSON(w, http.StatusOK, appJSON(*updated))
 }
 
@@ -260,6 +265,7 @@ func (h *Handler) deleteApp(w http.ResponseWriter, r *http.Request, user *auth.U
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
+	h.log.Record(r, user, "", app.Name, "delete_application", "success", "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -328,6 +334,7 @@ func (h *Handler) createKey(w http.ResponseWriter, r *http.Request, user *auth.U
 	}
 	body := keyJSON(*k)
 	body["secret_access_key"] = secret
+	h.log.Record(r, user, "", k.AccessKeyID, "create_access_key", "success", "")
 	httpx.JSON(w, http.StatusCreated, body)
 }
 
@@ -355,6 +362,7 @@ func (h *Handler) disableKey(w http.ResponseWriter, r *http.Request, user *auth.
 		return
 	}
 	k.Status = "disabled"
+	h.log.Record(r, user, "", k.AccessKeyID, "disable_access_key", "success", "")
 	httpx.JSON(w, http.StatusOK, keyJSON(*k))
 }
 

@@ -179,6 +179,43 @@ func (s *Store) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
+type Usage struct {
+	UsedBytes, ObjectCount     int64
+	TrashBytes, TrashCount     int64
+	VersionBytes, VersionCount int64
+}
+
+func (s *Store) UsageByID(ctx context.Context, ids []int64) (map[int64]Usage, error) {
+	out := map[int64]Usage{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT bucket_id,
+			COALESCE(SUM(size) FILTER (WHERE object_key NOT LIKE '.trash/%' AND object_key <> '.trash/' AND object_key NOT LIKE '.versions/%' AND object_key <> '.versions/'), 0),
+			COUNT(*) FILTER (WHERE object_key NOT LIKE '.trash/%' AND object_key <> '.trash/' AND object_key NOT LIKE '.versions/%' AND object_key <> '.versions/'),
+			COALESCE(SUM(size) FILTER (WHERE object_key LIKE '.trash/%' OR object_key = '.trash/'), 0),
+			COUNT(*) FILTER (WHERE object_key LIKE '.trash/%' OR object_key = '.trash/'),
+			COALESCE(SUM(size) FILTER (WHERE object_key LIKE '.versions/%' OR object_key = '.versions/'), 0),
+			COUNT(*) FILTER (WHERE object_key LIKE '.versions/%' OR object_key = '.versions/')
+		FROM object_records
+		WHERE bucket_id = ANY($1)
+		GROUP BY bucket_id`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("bucket usage: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var u Usage
+		if err := rows.Scan(&id, &u.UsedBytes, &u.ObjectCount, &u.TrashBytes, &u.TrashCount, &u.VersionBytes, &u.VersionCount); err != nil {
+			return nil, err
+		}
+		out[id] = u
+	}
+	return out, rows.Err()
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }

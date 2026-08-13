@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/cyxc1124/osspilot-tenant-api/internal/audit"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
@@ -20,10 +21,11 @@ type Handler struct {
 	tasks   *Store
 	protect func(auth.UserHandler) http.HandlerFunc
 	ac      *rbac.Checker
+	log     *audit.Logger
 }
 
-func NewHandler(s3 *storage.Client, buckets *bucket.Store, objects *objects.Store, tasks *Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker) *Handler {
-	return &Handler{s3: s3, buckets: buckets, objects: objects, tasks: tasks, protect: protect, ac: ac}
+func NewHandler(s3 *storage.Client, buckets *bucket.Store, objects *objects.Store, tasks *Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger) *Handler {
+	return &Handler{s3: s3, buckets: buckets, objects: objects, tasks: tasks, protect: protect, ac: ac, log: log}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -265,6 +267,7 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request, user *auth.Us
 		return
 	}
 	_ = h.tasks.Finish(r.Context(), task.ID, StatusDone, now)
+	h.log.Record(r, user, b.BucketName, key, "upload", "success", "")
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"bucket_name": b.BucketName, "object_key": key, "size": meta.Size,
 		"content_type": meta.ContentType, "etag": meta.ETag,

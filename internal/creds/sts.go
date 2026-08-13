@@ -96,6 +96,7 @@ func (h *Handler) issueSTS(w http.ResponseWriter, r *http.Request, user *auth.Us
 		return
 	}
 	_ = h.store.TouchKey(r.Context(), key.ID)
+	h.log.Record(r, user, "", key.AccessKeyID, "issue_sts_credentials", "success", "")
 	httpx.JSON(w, http.StatusOK, stsJSON(key.AccessKeyID, req.SecretAccessKey, token, exp, dur, h.s3End, h.s3Reg))
 }
 

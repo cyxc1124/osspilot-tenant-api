@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cyxc1124/osspilot-tenant-api/internal/audit"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
@@ -21,10 +22,11 @@ type Handler struct {
 	s3      *storage.Client
 	protect func(auth.UserHandler) http.HandlerFunc
 	ac      *rbac.Checker
+	log     *audit.Logger
 }
 
-func NewHandler(buckets *bucket.Store, store *Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker) *Handler {
-	return &Handler{buckets: buckets, store: store, s3: s3, protect: protect, ac: ac}
+func NewHandler(buckets *bucket.Store, store *Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger) *Handler {
+	return &Handler{buckets: buckets, store: store, s3: s3, protect: protect, ac: ac, log: log}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {

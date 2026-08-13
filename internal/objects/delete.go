@@ -49,9 +49,11 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request, user *auth.User
 	for _, key := range resolved {
 		if err := h.deleteOne(r.Context(), b, user.ID, key, permanent, now); err != nil {
 			failed = append(failed, opFailure{Key: key, Error: deleteErr(err)})
+			h.log.Record(r, user, b.BucketName, key, "delete", "failure", deleteErr(err))
 			continue
 		}
 		deleted = append(deleted, key)
+		h.log.Record(r, user, b.BucketName, key, "delete", "success", "")
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"deleted": deleted,

@@ -15,16 +15,21 @@ type bucketIDs interface {
 	VisibleID(ctx context.Context, accountID int64, name string) (*int64, error)
 }
 
+type auditor interface {
+	Record(r *http.Request, user *auth.User, bucket, key, action, status, errMsg string)
+}
+
 type Handler struct {
 	users   *auth.Store
 	store   *Store
 	buckets bucketIDs
 	protect func(auth.UserHandler) http.HandlerFunc
 	ac      *Checker
+	log     auditor
 }
 
-func NewHandler(users *auth.Store, store *Store, buckets bucketIDs, protect func(auth.UserHandler) http.HandlerFunc) *Handler {
-	return &Handler{users: users, store: store, buckets: buckets, protect: protect, ac: NewChecker(store)}
+func NewHandler(users *auth.Store, store *Store, buckets bucketIDs, protect func(auth.UserHandler) http.HandlerFunc, log auditor) *Handler {
+	return &Handler{users: users, store: store, buckets: buckets, protect: protect, ac: NewChecker(store), log: log}
 }
 
 func (h *Handler) Checker() *Checker { return h.ac }
@@ -204,6 +209,7 @@ func (h *Handler) createUser(w http.ResponseWriter, r *http.Request, user *auth.
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
+	h.log.Record(r, user, "", created.Username, "user_create", "success", "")
 	httpx.JSON(w, http.StatusCreated, toUserJSON(*created, accountID))
 }
 
@@ -255,6 +261,7 @@ func (h *Handler) updateUser(w http.ResponseWriter, r *http.Request, user *auth.
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
+	h.log.Record(r, user, "", updated.Username, "user_update", "success", "")
 	httpx.JSON(w, http.StatusOK, toUserJSON(*updated, accountID))
 }
 
@@ -276,6 +283,7 @@ func (h *Handler) deleteUser(w http.ResponseWriter, r *http.Request, user *auth.
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
+	h.log.Record(r, user, "", target.Username, "user_delete", "success", "")
 	httpx.JSON(w, http.StatusOK, item)
 }
 
