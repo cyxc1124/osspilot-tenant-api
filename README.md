@@ -18,7 +18,8 @@ go run ./cmd/api
 - `GET|POST /api/buckets`、`GET|PUT|DELETE /api/buckets/{bucket_name}`（有 S3 时建桶会同时 CreateBucket，并写入 `TENANT_CORS_ORIGINS` 默认 CORS；`versioning_enabled` 会同步 RGW；列表与读写只含当前账号已授权的桶）
 - `GET|PUT|DELETE /api/buckets/{bucket_name}/policy`
 - `GET|PUT|DELETE /api/buckets/{bucket_name}/cors`
-- `GET /api/buckets/{bucket_name}/objects`、`GET .../objects/detail`、`POST .../objects/directories`
+- `GET /api/buckets/{bucket_name}/objects`、`GET .../objects/detail`、`POST .../objects/directories`、`DELETE .../objects`（默认搬进 `.trash/`；`permanent=true` 直接删）
+- `GET|DELETE /api/buckets/{bucket_name}/trash`、`POST .../trash/restore`（列表/清空/恢复；列表读 `object_records`，恢复与清空走 RGW）
 - `POST /api/uploads/presign|complete`、`POST /api/uploads/multipart/{init,parts,complete,abort}`
 - `POST /api/downloads/presign`、`POST /api/downloads/batch`
 - `GET /api/versions`、`GET /api/versions/{id}`、`POST .../download`、`POST .../restore`、`DELETE /api/versions/{id}`
@@ -29,7 +30,7 @@ go run ./cmd/api
 
 登录品牌与 CDN 域名优先读 `platform_settings`，缺省回退环境变量与内置文案。`storage_region` 暂为 `null`（等运营区域投影）。
 
-租户不内置账号。运营投影写入的账号角色为 `tenant_admin`。租户控制台自建的桶会记成本地授权，运营改授权时不会清掉。对象版本是覆盖前复制到 `.versions/` 的归档（在线编辑 T10 才会大量产生；恢复当前对象时也会先归档）。用户带 `must_change_password=true` 时，除改密、`/api/me`、登出外一律 403。新密码至少 8 位且不能与旧密码相同。
+租户不内置账号。运营投影写入的账号角色为 `tenant_admin`。租户控制台自建的桶会记成本地授权，运营改授权时不会清掉。对象版本是覆盖前复制到 `.versions/` 的归档（在线编辑 T10 才会大量产生；恢复当前对象时也会先归档）。删除对象默认复制到 `.trash/{原 key}` 并改写 `object_records`（不是单独的回收站表）；回收站列表剥掉 `.trash/` 前缀。大批量删除目前同步执行（T14 再排队）。用户带 `must_change_password=true` 时，除改密、`/api/me`、登出外一律 403。新密码至少 8 位且不能与旧密码相同。
 
 契约见 `openapi.yaml`。无 `DATABASE_URL` 时 healthz 仍可用，鉴权接口返回 503。
 

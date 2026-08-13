@@ -115,6 +115,13 @@ paths:
       responses:
         "200":
           description: items and prefixes
+    delete:
+      summary: Soft-delete objects into .trash/, or permanently delete when permanent=true
+      responses:
+        "200":
+          description: deleted and failed keys
+        "503":
+          description: storage is not configured
   /api/buckets/{bucket_name}/objects/detail:
     get:
       summary: Object metadata
@@ -127,6 +134,27 @@ paths:
       responses:
         "200":
           description: created
+  /api/buckets/{bucket_name}/trash:
+    get:
+      summary: List soft-deleted objects (original keys, without .trash/)
+      responses:
+        "200":
+          description: items
+    delete:
+      summary: Permanently delete objects from the recycle bin
+      responses:
+        "200":
+          description: succeeded and failed keys
+        "503":
+          description: storage is not configured
+  /api/buckets/{bucket_name}/trash/restore:
+    post:
+      summary: Restore objects from .trash/ back to their original keys
+      responses:
+        "200":
+          description: succeeded and failed keys
+        "503":
+          description: storage is not configured
   /api/uploads/presign:
     post:
       summary: Presign PUT upload

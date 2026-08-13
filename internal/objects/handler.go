@@ -29,6 +29,10 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/buckets/{bucket_name}/objects", h.protect(h.list))
 	mux.HandleFunc("GET /api/buckets/{bucket_name}/objects/detail", h.protect(h.detail))
 	mux.HandleFunc("POST /api/buckets/{bucket_name}/objects/directories", h.protect(h.mkdir))
+	mux.HandleFunc("DELETE /api/buckets/{bucket_name}/objects", h.protect(h.remove))
+	mux.HandleFunc("GET /api/buckets/{bucket_name}/trash", h.protect(h.listTrash))
+	mux.HandleFunc("POST /api/buckets/{bucket_name}/trash/restore", h.protect(h.restoreTrash))
+	mux.HandleFunc("DELETE /api/buckets/{bucket_name}/trash", h.protect(h.purgeTrash))
 }
 
 type summary struct {
@@ -102,7 +106,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request, user *auth.User) 
 
 func (h *Handler) detail(w http.ResponseWriter, r *http.Request, user *auth.User) {
 	key := strings.TrimSpace(r.URL.Query().Get("key"))
-	if key == "" || strings.HasPrefix(key, trashPrefix) {
+	if key == "" || strings.HasPrefix(key, TrashPrefix) {
 		httpx.Error(w, http.StatusBadRequest, "Invalid object key")
 		return
 	}
@@ -191,4 +195,12 @@ func (h *Handler) bucket(w http.ResponseWriter, r *http.Request, user *auth.User
 		return nil, false
 	}
 	return b, true
+}
+
+func (h *Handler) requireS3(w http.ResponseWriter) bool {
+	if h.s3 == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
+		return false
+	}
+	return true
 }

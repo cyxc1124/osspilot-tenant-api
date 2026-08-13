@@ -92,3 +92,99 @@ func (s *Store) Upsert(ctx context.Context, bucketID int64, bucketName, key stri
 	}
 	return nil
 }
+
+func (s *Store) ListTrash(ctx context.Context, bucketID int64, prefix, after string, limit int) ([]record, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT object_key, COALESCE(size, 0), content_type, COALESCE(last_seen_at, updated_at)
+		FROM object_records
+		WHERE bucket_id = $1
+		  AND object_key LIKE $2 ESCAPE '\'
+		  AND object_key > $3
+		ORDER BY object_key
+		LIMIT $4`, bucketID, likePrefix(TrashPrefix+prefix), after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list trash: %w", err)
+	}
+	defer rows.Close()
+	var out []record
+	for rows.Next() {
+		var rec record
+		var last time.Time
+		if err := rows.Scan(&rec.Key, &rec.Size, &rec.ContentType, &last); err != nil {
+			return nil, err
+		}
+		ts := last.UTC().Format(time.RFC3339)
+		rec.LastModified = &ts
+		out = append(out, rec)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListLiveKeys(ctx context.Context, bucketID int64, prefix string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT object_key
+		FROM object_records
+		WHERE bucket_id = $1
+		  AND object_key LIKE $2 ESCAPE '\'
+		  AND object_key NOT LIKE '.trash/%'
+		  AND object_key <> '.trash/'
+		  AND object_key NOT LIKE '.versions/%'
+		  AND object_key <> '.versions/'
+		ORDER BY object_key`, bucketID, likePrefix(prefix))
+	if err != nil {
+		return nil, fmt.Errorf("list live keys: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		out = append(out, key)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) Delete(ctx context.Context, bucketID int64, key string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM object_records WHERE bucket_id = $1 AND object_key = $2`, bucketID, key)
+	if err != nil {
+		return fmt.Errorf("delete object: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) MoveKey(ctx context.Context, bucketID int64, bucketName, from, to string, size int64, etag, contentType *string, userID int64, at time.Time) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("move object begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `DELETE FROM object_records WHERE bucket_id = $1 AND object_key = $2`, bucketID, to); err != nil {
+		return fmt.Errorf("move object drop dest: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE object_records SET
+			object_key = $3, size = $4, etag = $5, content_type = $6,
+			updated_by = $7, last_seen_at = $8, updated_at = $8
+		WHERE bucket_id = $1 AND object_key = $2`,
+		bucketID, from, to, size, etag, contentType, userID, at)
+	if err != nil {
+		return fmt.Errorf("move object: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO object_records (
+				bucket_id, bucket_name, object_key, size, etag, content_type,
+				created_by, updated_by, last_seen_at, created_at, updated_at
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$8,$8)`,
+			bucketID, bucketName, to, size, etag, contentType, userID, at); err != nil {
+			return fmt.Errorf("move object insert: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("move object commit: %w", err)
+	}
+	return nil
+}

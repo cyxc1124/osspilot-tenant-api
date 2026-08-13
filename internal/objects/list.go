@@ -3,10 +3,9 @@ package objects
 import "strings"
 
 const (
-	trashPrefix    = ".trash/"
-	versionPrefix  = ".versions/"
 	defaultMaxKeys = 100
 	maxListKeys    = 1000
+	maxOpKeys      = 1000
 	// ponytail: fold a bounded scan instead of S3 ListObjectsV2; T4 can switch to RGW.
 	scanCap = 2000
 )
@@ -34,7 +33,7 @@ func foldList(prefix string, maxKeys int, recs []record, moreInDB bool) (items [
 	tokenKey := ""
 	n := 0
 	for _, rec := range recs {
-		if strings.HasPrefix(rec.Key, trashPrefix) || strings.HasPrefix(rec.Key, versionPrefix) {
+		if strings.HasPrefix(rec.Key, TrashPrefix) || strings.HasPrefix(rec.Key, VersionPrefix) {
 			tokenKey = rec.Key
 			continue
 		}
