@@ -137,14 +137,23 @@ func (c *Client) PresignPut(ctx context.Context, bucket, key, contentType string
 	return out.URL, int(c.uploadTTL.Seconds()), nil
 }
 
+func (c *Client) DownloadTTL() time.Duration { return c.downloadTTL }
+
 func (c *Client) PresignGet(ctx context.Context, bucket, key string) (string, int, error) {
+	return c.PresignGetFor(ctx, bucket, key, c.downloadTTL)
+}
+
+func (c *Client) PresignGetFor(ctx context.Context, bucket, key string, ttl time.Duration) (string, int, error) {
+	if ttl < time.Second {
+		return "", 0, errors.New("expired")
+	}
 	out, err := c.presign.PresignGetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucket), Key: aws.String(key),
-	}, s3.WithPresignExpires(c.downloadTTL))
+	}, s3.WithPresignExpires(ttl))
 	if err != nil {
 		return "", 0, err
 	}
-	return out.URL, int(c.downloadTTL.Seconds()), nil
+	return out.URL, int(ttl.Seconds()), nil
 }
 
 func (c *Client) PresignUploadPart(ctx context.Context, bucket, key, uploadID string, part int32) (string, error) {

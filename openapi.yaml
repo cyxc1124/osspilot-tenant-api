@@ -269,3 +269,38 @@ paths:
       responses:
         "200":
           description: restored
+  /api/share-links:
+    get:
+      summary: List active share links
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create a temporary share link
+      responses:
+        "200":
+          description: item
+        "503":
+          description: storage is not configured
+  /api/share-links/{link_id}:
+    delete:
+      summary: Revoke a share link
+      responses:
+        "204":
+          description: revoked
+        "404":
+          description: not found
+  /s/{token}:
+    get:
+      summary: Public share access (presigned URLs, no JWT)
+      responses:
+        "200":
+          description: download and preview urls
+        "401":
+          description: invalid or missing password
+        "403":
+          description: access limit reached
+        "404":
+          description: not found
+        "410":
+          description: expired
