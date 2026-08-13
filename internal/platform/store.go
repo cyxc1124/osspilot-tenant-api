@@ -102,3 +102,22 @@ func (s *Store) CleanupPolicy(ctx context.Context, enabledKey, daysKey string, d
 	}
 	return pickInt(rows, daysKey, defaultDays), pickBool(rows, enabledKey, false), nil
 }
+
+func regionFrom(rows map[string]string) *Region {
+	code := rows["storage_region_code"]
+	if code == "" {
+		return nil
+	}
+	id := int64(0)
+	if raw := rows["storage_region_id"]; raw != "" {
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			id = n
+		}
+	}
+	return &Region{
+		ID:         id,
+		Code:       code,
+		Name:       rows["storage_region_name"],
+		S3Endpoint: rows["s3_endpoint"],
+	}
+}

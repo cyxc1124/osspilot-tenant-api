@@ -3,7 +3,7 @@ package platform
 import "testing"
 
 func TestProjectableKeys(t *testing.T) {
-	for _, k := range []string{"trash_cleanup_enabled", "version_cleanup_enabled", "multipart_cleanup_enabled", "tenant_login_title"} {
+	for _, k := range []string{"trash_cleanup_enabled", "version_cleanup_enabled", "multipart_cleanup_enabled", "tenant_login_title", "storage_region_code", "s3_endpoint"} {
 		if _, ok := projectable[k]; !ok {
 			t.Fatalf("missing %s", k)
 		}
