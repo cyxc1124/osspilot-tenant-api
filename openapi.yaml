@@ -338,6 +338,16 @@ paths:
           description: bad projection secret
         "503":
           description: queue unavailable
+  /internal/settings:
+    put:
+      summary: Upsert projected platform settings from ops
+      responses:
+        "204":
+          description: upserted
+        "401":
+          description: bad projection secret
+        "400":
+          description: unsupported key
   /internal/accounts/{username}/rbac/user-groups:
     get:
       summary: List user groups for a projected account (ops proxy)

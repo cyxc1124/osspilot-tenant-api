@@ -38,15 +38,17 @@ type Handler struct {
 	store     *Store
 	fallbacks Fallbacks
 	protect   func(auth.UserHandler) http.HandlerFunc
+	secret    string
 }
 
-func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, fallbacks Fallbacks) *Handler {
-	return &Handler{store: store, protect: protect, fallbacks: fallbacks}
+func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, fallbacks Fallbacks, projectionSecret string) *Handler {
+	return &Handler{store: store, protect: protect, fallbacks: fallbacks, secret: projectionSecret}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/login-branding", h.branding)
 	mux.HandleFunc("GET /api/platform-config", h.protect(h.config))
+	h.registerInternal(mux)
 }
 
 func (h *Handler) branding(w http.ResponseWriter, r *http.Request) {

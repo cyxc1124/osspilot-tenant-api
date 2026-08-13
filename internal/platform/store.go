@@ -72,10 +72,33 @@ func pickBool(rows map[string]string, key string, fallback bool) bool {
 	return fallback
 }
 
+func (s *Store) Upsert(ctx context.Context, key, value string) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO platform_settings (key, value, updated_at)
+		VALUES ($1, $2, now())
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, key, value)
+	if err != nil {
+		return fmt.Errorf("upsert setting %s: %w", key, err)
+	}
+	return nil
+}
+
 func (s *Store) TrashPolicy(ctx context.Context) (days int, enabled bool, err error) {
+	return s.CleanupPolicy(ctx, "trash_cleanup_enabled", "trash_retention_days", 0)
+}
+
+func (s *Store) VersionPolicy(ctx context.Context) (days int, enabled bool, err error) {
+	return s.CleanupPolicy(ctx, "version_cleanup_enabled", "version_retention_days", 0)
+}
+
+func (s *Store) MultipartPolicy(ctx context.Context) (staleDays int, enabled bool, err error) {
+	return s.CleanupPolicy(ctx, "multipart_cleanup_enabled", "multipart_stale_days", 7)
+}
+
+func (s *Store) CleanupPolicy(ctx context.Context, enabledKey, daysKey string, defaultDays int) (days int, enabled bool, err error) {
 	rows, err := s.Map(ctx)
 	if err != nil {
 		return 0, false, err
 	}
-	return pickInt(rows, "trash_retention_days", 0), pickBool(rows, "trash_cleanup_enabled", false), nil
+	return pickInt(rows, daysKey, defaultDays), pickBool(rows, enabledKey, false), nil
 }

@@ -173,7 +173,7 @@ func main() {
 		PreviewCDNURL:     cfg.PreviewCDNURL,
 		ObjectHTTPDomain:  cfg.ObjectHTTPDomain,
 		ObjectHTTPSDomain: cfg.ObjectHTTPSDomain,
-	})
+	}, cfg.ProjectionSecret)
 	q := queue.New(cfg.RedisURL)
 	if q != nil {
 		defer q.Close()
