@@ -210,3 +210,34 @@ paths:
           description: replaced
         "404":
           description: account missing
+  /api/versions:
+    get:
+      summary: List archived versions of an object
+      responses:
+        "200":
+          description: items and total
+  /api/versions/{version_id}:
+    get:
+      summary: Version metadata
+      responses:
+        "200":
+          description: summary
+        "404":
+          description: not found
+    delete:
+      summary: Delete an archived version
+      responses:
+        "200":
+          description: deleted
+  /api/versions/{version_id}/download:
+    post:
+      summary: Presign GET for an archived version
+      responses:
+        "200":
+          description: url
+  /api/versions/{version_id}/restore:
+    post:
+      summary: Restore an archived version onto the live key
+      responses:
+        "200":
+          description: restored

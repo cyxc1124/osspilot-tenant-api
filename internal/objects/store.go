@@ -27,6 +27,8 @@ func (s *Store) ListPrefix(ctx context.Context, bucketID int64, prefix, after st
 		  AND object_key > $3
 		  AND object_key NOT LIKE '.trash/%'
 		  AND object_key <> '.trash/'
+		  AND object_key NOT LIKE '.versions/%'
+		  AND object_key <> '.versions/'
 		ORDER BY object_key
 		LIMIT $4`, bucketID, likePrefix(prefix), after, limit)
 	if err != nil {

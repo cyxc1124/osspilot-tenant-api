@@ -156,6 +156,14 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 				return
 			}
 		}
+		if b.VersioningEnabled {
+			if err := h.s3.PutBucketVersioning(r.Context(), b.BucketName, "Enabled"); err != nil {
+				_ = h.s3.DeleteBucket(r.Context(), b.BucketName)
+				_ = h.store.Delete(r.Context(), b.ID)
+				httpx.Error(w, http.StatusBadGateway, "storage error")
+				return
+			}
+		}
 	}
 	httpx.JSON(w, http.StatusCreated, toDetail(*b))
 }
@@ -193,6 +201,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, user *auth.User
 	if req.ObjectLimit != nil {
 		b.ObjectLimit = req.ObjectLimit
 	}
+	prevVer := b.VersioningEnabled
 	if req.VersioningEnabled != nil {
 		b.VersioningEnabled = *req.VersioningEnabled
 	}
@@ -207,6 +216,16 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, user *auth.User
 	}
 	if err := h.validateLogging(w, r, user, b.AccessLoggingEnabled, b.AccessLogTargetBucket, b.BucketName); err != nil {
 		return
+	}
+	if h.s3 != nil && b.VersioningEnabled != prevVer {
+		status := "Suspended"
+		if b.VersioningEnabled {
+			status = "Enabled"
+		}
+		if err := h.s3.PutBucketVersioning(r.Context(), b.BucketName, status); err != nil {
+			httpx.Error(w, http.StatusBadGateway, "storage error")
+			return
+		}
 	}
 	b.UpdatedAt = time.Now()
 	if err := h.store.Update(r.Context(), b); err != nil {

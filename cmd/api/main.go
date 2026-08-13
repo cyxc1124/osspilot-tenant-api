@@ -19,9 +19,10 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/project"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/uploads"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/versions"
 )
 
-func newMux(authH *auth.Handler, bucketH *bucket.Handler, objectH *objects.Handler, uploadH *uploads.Handler, downloadH *downloads.Handler, platformH *platform.Handler, projectH *project.Handler) http.Handler {
+func newMux(authH *auth.Handler, bucketH *bucket.Handler, objectH *objects.Handler, uploadH *uploads.Handler, downloadH *downloads.Handler, platformH *platform.Handler, projectH *project.Handler, versionH *versions.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
 	if authH != nil {
@@ -45,6 +46,9 @@ func newMux(authH *auth.Handler, bucketH *bucket.Handler, objectH *objects.Handl
 	if projectH != nil {
 		projectH.Register(mux)
 	}
+	if versionH != nil {
+		versionH.Register(mux)
+	}
 	return httpx.CORS(mux)
 }
 
@@ -64,6 +68,7 @@ func main() {
 	var objectStore *objects.Store
 	var uploadStore *uploads.Store
 	var settingsStore *platform.Store
+	var versionStore *versions.Store
 	if cfg.DatabaseURL != "" {
 		pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
 		if err != nil {
@@ -76,6 +81,7 @@ func main() {
 		objectStore = objects.NewStore(pool)
 		uploadStore = uploads.NewStore(pool)
 		settingsStore = platform.NewStore(pool)
+		versionStore = versions.NewStore(pool)
 	} else {
 		slog.Warn("DATABASE_URL unset; auth routes return 503")
 	}
@@ -106,12 +112,13 @@ func main() {
 		ObjectHTTPSDomain: cfg.ObjectHTTPSDomain,
 	})
 	projectH := project.NewHandler(cfg.ProjectionSecret, authStore, bucketStore)
+	versionH := versions.NewHandler(versionStore, bucketStore, s3c, authH.RequireUser)
 	if cfg.ProjectionSecret == "" {
 		slog.Warn("PROJECTION_SECRET unset; internal projection routes return 503")
 	}
 	addr := cfg.HTTPAddr
 	slog.Info("listen", "addr", addr)
-	if err := http.ListenAndServe(addr, newMux(authH, bucketH, objectH, uploadH, downloadH, platformH, projectH)); err != nil {
+	if err := http.ListenAndServe(addr, newMux(authH, bucketH, objectH, uploadH, downloadH, platformH, projectH, versionH)); err != nil {
 		slog.Error("server", "err", err)
 		os.Exit(1)
 	}

@@ -194,6 +194,38 @@ func (c *Client) AbortMultipart(ctx context.Context, bucket, key, uploadID strin
 	return err
 }
 
+func (c *Client) CopyObject(ctx context.Context, destBucket, destKey, srcBucket, srcKey string) (*string, error) {
+	out, err := c.s3.CopyObject(ctx, &s3.CopyObjectInput{
+		Bucket:     aws.String(destBucket),
+		Key:        aws.String(destKey),
+		CopySource: aws.String(srcBucket + "/" + srcKey),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if out.CopyObjectResult == nil {
+		return nil, nil
+	}
+	return stripETag(out.CopyObjectResult.ETag), nil
+}
+
+func (c *Client) DeleteObject(ctx context.Context, bucket, key string) error {
+	_, err := c.s3.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
+	return err
+}
+
+func (c *Client) PutBucketVersioning(ctx context.Context, bucket, status string) error {
+	st := types.BucketVersioningStatusSuspended
+	if status == "Enabled" {
+		st = types.BucketVersioningStatusEnabled
+	}
+	_, err := c.s3.PutBucketVersioning(ctx, &s3.PutBucketVersioningInput{
+		Bucket:                  aws.String(bucket),
+		VersioningConfiguration: &types.VersioningConfiguration{Status: st},
+	})
+	return err
+}
+
 func (c *Client) GetBucketPolicy(ctx context.Context, bucket string) (map[string]any, error) {
 	out, err := c.s3.GetBucketPolicy(ctx, &s3.GetBucketPolicyInput{Bucket: aws.String(bucket)})
 	if err != nil {
