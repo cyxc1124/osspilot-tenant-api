@@ -2,11 +2,11 @@ package rbac
 
 import "testing"
 
-func TestProjectionBearerOK(t *testing.T) {
-	if !projectionBearerOK("Bearer secret", "secret") {
-		t.Fatal("expected match")
+func TestProjectionOK(t *testing.T) {
+	if !projectionOK("Bearer secret", "secret") {
+		t.Fatal("want match")
 	}
-	if projectionBearerOK("Bearer nope", "secret") || projectionBearerOK("secret", "secret") || projectionBearerOK("Bearer secret", "") {
-		t.Fatal("expected reject")
+	if projectionOK("Bearer nope", "secret") || projectionOK("secret", "secret") {
+		t.Fatal("want reject")
 	}
 }

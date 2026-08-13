@@ -29,8 +29,8 @@ type Handler struct {
 	secret  string
 }
 
-func NewHandler(users *auth.Store, store *Store, buckets bucketIDs, protect func(auth.UserHandler) http.HandlerFunc, log auditor) *Handler {
-	return &Handler{users: users, store: store, buckets: buckets, protect: protect, ac: NewChecker(store), log: log}
+func NewHandler(users *auth.Store, store *Store, buckets bucketIDs, protect func(auth.UserHandler) http.HandlerFunc, log auditor, projectionSecret string) *Handler {
+	return &Handler{users: users, store: store, buckets: buckets, protect: protect, ac: NewChecker(store), log: log, secret: projectionSecret}
 }
 
 func (h *Handler) Checker() *Checker { return h.ac }
@@ -63,6 +63,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/permission-templates/{template_id}/rules/{rule_id}", h.protect(h.deleteTemplateRule))
 	mux.HandleFunc("POST /api/permission-templates/{template_id}/assignments", h.protect(h.createAssignment))
 	mux.HandleFunc("DELETE /api/permission-templates/{template_id}/assignments/{assignment_id}", h.protect(h.deleteAssignment))
+	h.registerInternal(mux)
 }
 
 func (h *Handler) ready(w http.ResponseWriter) bool {
