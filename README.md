@@ -28,6 +28,7 @@ go run ./cmd/worker
 - `GET|PUT|DELETE /api/buckets/{bucket_name}/policy`
 - `GET|PUT|DELETE /api/buckets/{bucket_name}/cors`
 - `GET /api/buckets/{bucket_name}/objects`、`GET .../objects/detail`、`POST .../objects/directories`、`DELETE .../objects`（默认搬进 `.trash/`；`permanent=true` 直接删）
+- `POST /api/buckets/{bucket_name}/objects/{copy,move,rename}`（同步 CopyObject；大批量入队另片）
 - `GET|DELETE /api/buckets/{bucket_name}/trash`、`POST .../trash/restore`（列表/清空/恢复；列表读 `object_records`，恢复与清空走 RGW）
 - `POST /api/uploads/presign|complete`、`POST /api/uploads/multipart/{init,parts,complete,abort}`
 - `POST /api/downloads/presign`、`POST /api/downloads/batch`

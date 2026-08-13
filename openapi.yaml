@@ -134,6 +134,24 @@ paths:
       responses:
         "200":
           description: created
+  /api/buckets/{bucket_name}/objects/copy:
+    post:
+      summary: Copy objects within or across visible buckets
+      responses:
+        "200":
+          description: copied and failed
+  /api/buckets/{bucket_name}/objects/move:
+    post:
+      summary: Move objects within a bucket
+      responses:
+        "200":
+          description: moved and failed
+  /api/buckets/{bucket_name}/objects/rename:
+    post:
+      summary: Rename an object in place
+      responses:
+        "200":
+          description: renamed
   /api/buckets/{bucket_name}/trash:
     get:
       summary: List soft-deleted objects (original keys, without .trash/)

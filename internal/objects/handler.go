@@ -37,6 +37,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/buckets/{bucket_name}/trash", h.protect(h.listTrash))
 	mux.HandleFunc("POST /api/buckets/{bucket_name}/trash/restore", h.protect(h.restoreTrash))
 	mux.HandleFunc("DELETE /api/buckets/{bucket_name}/trash", h.protect(h.purgeTrash))
+	h.RegisterCopy(mux)
 }
 
 type summary struct {
