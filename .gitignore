@@ -1,5 +1,6 @@
 /bin/
 /dist/
+/api
 *.exe
 *.test
 coverage.out
