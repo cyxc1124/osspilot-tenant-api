@@ -60,6 +60,7 @@ func main() {
 
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(worker.TaskInventory, jobs.Inventory)
+	mux.HandleFunc(worker.TaskInventoryBucket, jobs.InventoryBucket)
 	mux.HandleFunc(worker.TaskTrash, jobs.Trash)
 
 	srv := asynq.NewServer(redisOpt, asynq.Config{Concurrency: 2})

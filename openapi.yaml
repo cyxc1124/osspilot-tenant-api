@@ -328,6 +328,16 @@ paths:
           description: disabled
         "409":
           description: not approved
+  /internal/buckets/{bucket_name}/inventory:
+    post:
+      summary: Enqueue inventory scan for a bucket (ops proxy)
+      responses:
+        "200":
+          description: job_id and message
+        "401":
+          description: bad projection secret
+        "503":
+          description: queue unavailable
   /api/versions:
     get:
       summary: List archived versions of an object

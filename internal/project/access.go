@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/creds"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/queue"
 )
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -19,6 +21,44 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /internal/api-access/{username}/approve", h.review("approve"))
 	mux.HandleFunc("POST /internal/api-access/{username}/reject", h.review("reject"))
 	mux.HandleFunc("POST /internal/api-access/{username}/disable", h.review("disable"))
+	mux.HandleFunc("POST /internal/buckets/{bucket_name}/inventory", h.enqueueInventory)
+}
+
+func (h *Handler) enqueueInventory(w http.ResponseWriter, r *http.Request) {
+	if h.secret == "" || h.buckets == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "projection is not configured")
+		return
+	}
+	if !bearerOK(r.Header.Get("Authorization"), h.secret) {
+		httpx.Error(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	if h.queue == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "task queue unavailable")
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("bucket_name"))
+	if name == "" {
+		httpx.Error(w, http.StatusBadRequest, "bucket_name is required")
+		return
+	}
+	if _, err := h.buckets.Ensure(r.Context(), name, nil); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	jobID, err := h.queue.EnqueueInventory(r.Context(), name)
+	if err != nil {
+		if errors.Is(err, queue.ErrUnavailable) {
+			httpx.Error(w, http.StatusServiceUnavailable, "task queue unavailable")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, "queue error")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"bucket_name": name, "job_id": jobID,
+		"message": "容量统计任务已提交，请稍后刷新查看结果",
+	})
 }
 
 func (h *Handler) gateAccess(w http.ResponseWriter, r *http.Request) bool {

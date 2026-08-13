@@ -21,6 +21,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/preview"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/project"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/queue"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/share"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/stats"
@@ -173,7 +174,13 @@ func main() {
 		ObjectHTTPDomain:  cfg.ObjectHTTPDomain,
 		ObjectHTTPSDomain: cfg.ObjectHTTPSDomain,
 	})
-	projectH := project.NewHandler(cfg.ProjectionSecret, authStore, bucketStore, credsStore)
+	q := queue.New(cfg.RedisURL)
+	if q != nil {
+		defer q.Close()
+	} else {
+		slog.Warn("REDIS_URL unset; internal inventory enqueue returns 503")
+	}
+	projectH := project.NewHandler(cfg.ProjectionSecret, authStore, bucketStore, credsStore, q)
 	versionH := versions.NewHandler(versionStore, bucketStore, s3c, authH.RequireUser, ac)
 	shareH := share.NewHandler(shareStore, bucketStore, s3c, authH.RequireUser, ac, auditLog)
 	editH := edit.NewHandler(editStore, bucketStore, versionStore, settingsStore, s3c, authH.RequireUser, edit.OfficeEnv{

@@ -233,6 +233,17 @@ func (s *Store) ListActive(ctx context.Context) ([]Bucket, error) {
 	return out, rows.Err()
 }
 
+func (s *Store) GetByName(ctx context.Context, name string) (*Bucket, error) {
+	b, err := scanBucket(s.pool.QueryRow(ctx, `SELECT `+bucketCols+` FROM buckets WHERE bucket_name = $1`, name))
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get bucket by name: %w", err)
+	}
+	return &b, nil
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }

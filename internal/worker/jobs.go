@@ -2,8 +2,10 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/hibiken/asynq"
@@ -11,12 +13,14 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/queue"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
 const (
-	TaskInventory = "objects:inventory"
-	TaskTrash     = "objects:trash"
+	TaskInventory       = "objects:inventory"
+	TaskInventoryBucket = queue.TaskInventoryBucket
+	TaskTrash           = "objects:trash"
 )
 
 type Jobs struct {
@@ -37,6 +41,27 @@ func (j *Jobs) Inventory(ctx context.Context, _ *asynq.Task) error {
 		}
 	}
 	slog.Info("inventory done", "buckets", len(items))
+	return nil
+}
+
+func (j *Jobs) InventoryBucket(ctx context.Context, t *asynq.Task) error {
+	var req struct {
+		BucketName string `json:"bucket_name"`
+	}
+	if err := json.Unmarshal(t.Payload(), &req); err != nil || strings.TrimSpace(req.BucketName) == "" {
+		return fmt.Errorf("invalid inventory payload")
+	}
+	b, err := j.Buckets.GetByName(ctx, req.BucketName)
+	if err != nil {
+		return err
+	}
+	if b == nil || b.Status != "active" {
+		return fmt.Errorf("bucket %s not found", req.BucketName)
+	}
+	if err := j.scanBucket(ctx, *b); err != nil {
+		return fmt.Errorf("inventory %s: %w", req.BucketName, err)
+	}
+	slog.Info("inventory bucket done", "bucket", req.BucketName)
 	return nil
 }
 

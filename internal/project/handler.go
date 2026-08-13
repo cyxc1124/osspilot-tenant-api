@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"crypto/subtle"
 	"net/http"
 	"strings"
@@ -16,10 +17,15 @@ type Handler struct {
 	users   *auth.Store
 	buckets *bucket.Store
 	creds   *creds.Store
+	queue   inventoryQueue
 }
 
-func NewHandler(secret string, users *auth.Store, buckets *bucket.Store, credsStore *creds.Store) *Handler {
-	return &Handler{secret: secret, users: users, buckets: buckets, creds: credsStore}
+type inventoryQueue interface {
+	EnqueueInventory(ctx context.Context, bucketName string) (string, error)
+}
+
+func NewHandler(secret string, users *auth.Store, buckets *bucket.Store, credsStore *creds.Store, q inventoryQueue) *Handler {
+	return &Handler{secret: secret, users: users, buckets: buckets, creds: credsStore, queue: q}
 }
 
 type accountReq struct {
