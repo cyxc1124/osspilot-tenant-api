@@ -7,6 +7,7 @@ import (
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/creds"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 )
 
@@ -14,16 +15,11 @@ type Handler struct {
 	secret  string
 	users   *auth.Store
 	buckets *bucket.Store
+	creds   *creds.Store
 }
 
-func NewHandler(secret string, users *auth.Store, buckets *bucket.Store) *Handler {
-	return &Handler{secret: secret, users: users, buckets: buckets}
-}
-
-func (h *Handler) Register(mux *http.ServeMux) {
-	mux.HandleFunc("PUT /internal/accounts/{username}", h.upsert)
-	mux.HandleFunc("DELETE /internal/accounts/{username}", h.remove)
-	mux.HandleFunc("PUT /internal/accounts/{username}/buckets", h.replaceBuckets)
+func NewHandler(secret string, users *auth.Store, buckets *bucket.Store, credsStore *creds.Store) *Handler {
+	return &Handler{secret: secret, users: users, buckets: buckets, creds: credsStore}
 }
 
 type accountReq struct {

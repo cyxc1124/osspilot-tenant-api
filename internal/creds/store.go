@@ -18,12 +18,17 @@ type Store struct {
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 type AccessRow struct {
+	ID          int64
 	AccountID   int64
+	Username    string
 	Status      string
+	RequestedBy *int64
 	RequestedAt *time.Time
 	ReviewedAt  *time.Time
 	ReviewNote  *string
 	RGWUID      *string
+	AppCount    int64
+	KeyCount    int64
 }
 
 type App struct {
@@ -53,11 +58,64 @@ type Key struct {
 }
 
 func (s *Store) GetAccess(ctx context.Context, accountID int64) (*AccessRow, error) {
-	var a AccessRow
-	err := s.pool.QueryRow(ctx, `
-		SELECT account_id, status, requested_at, reviewed_at, review_note, rgw_uid
-		FROM tenant_api_access WHERE account_id = $1`, accountID).
-		Scan(&a.AccountID, &a.Status, &a.RequestedAt, &a.ReviewedAt, &a.ReviewNote, &a.RGWUID)
+	return s.scanAccess(s.pool.QueryRow(ctx, accessSelect+` WHERE a.account_id = $1`, accountID))
+}
+
+func (s *Store) GetAccessByUsername(ctx context.Context, username string) (*AccessRow, error) {
+	return s.scanAccess(s.pool.QueryRow(ctx, accessSelect+` WHERE u.username = $1`, username))
+}
+
+func (s *Store) ListAccess(ctx context.Context, status string) ([]AccessRow, error) {
+	q := accessSelect + ` WHERE ($1 = '' OR a.status = $1) ORDER BY a.requested_at DESC NULLS LAST, a.id DESC`
+	rows, err := s.pool.Query(ctx, q, status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AccessRow
+	for rows.Next() {
+		a, err := scanAccessRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ReviewAccess(ctx context.Context, accountID int64, action string, note *string, rgwUID *string) (*AccessRow, error) {
+	cur, err := s.GetAccess(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if cur == nil {
+		return nil, nil
+	}
+	next, err := reviewTarget(action, cur.Status)
+	if err != nil {
+		return nil, err
+	}
+	_, err = s.pool.Exec(ctx, `
+		UPDATE tenant_api_access SET
+			status = $2, reviewed_at = now(), review_note = $3,
+			rgw_uid = COALESCE($4, rgw_uid), updated_at = now()
+		WHERE account_id = $1`, accountID, next, note, rgwUID)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetAccess(ctx, accountID)
+}
+
+const accessSelect = `
+	SELECT a.id, a.account_id, u.username, a.status, a.requested_by, a.requested_at,
+		a.reviewed_at, a.review_note, a.rgw_uid,
+		(SELECT count(*) FROM tenant_applications t WHERE t.account_id = a.account_id),
+		(SELECT count(*) FROM application_access_keys k WHERE k.account_id = a.account_id)
+	FROM tenant_api_access a
+	JOIN tenant_users u ON u.id = a.account_id`
+
+func (s *Store) scanAccess(row pgx.Row) (*AccessRow, error) {
+	a, err := scanAccessRow(row)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -65,6 +123,13 @@ func (s *Store) GetAccess(ctx context.Context, accountID int64) (*AccessRow, err
 		return nil, err
 	}
 	return &a, nil
+}
+
+func scanAccessRow(row interface{ Scan(dest ...any) error }) (AccessRow, error) {
+	var a AccessRow
+	err := row.Scan(&a.ID, &a.AccountID, &a.Username, &a.Status, &a.RequestedBy, &a.RequestedAt,
+		&a.ReviewedAt, &a.ReviewNote, &a.RGWUID, &a.AppCount, &a.KeyCount)
+	return a, err
 }
 
 func (s *Store) RequestAccess(ctx context.Context, accountID, userID int64, note *string) (*AccessRow, error) {

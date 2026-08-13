@@ -41,7 +41,8 @@ go run ./cmd/worker
 - `GET|POST /api/user-groups`、组成员增删
 - `GET|POST /api/permissions`、`PUT|DELETE /api/permissions/{id}`
 - `GET|POST /api/permission-templates` 及 rules / assignments
-- `GET /api/api-access`、`POST /api/api-access/request`（开通状态；批准在运营侧，本地可 `UPDATE tenant_api_access SET status='approved'`）
+- `GET /api/api-access`、`POST /api/api-access/request`（开通状态；批准走运营 `POST /internal/api-access/{username}/approve`）
+- `PUT|DELETE /internal/accounts/{username}`、`PUT /internal/accounts/{username}/buckets`、`GET /internal/api-access`、`GET|POST /internal/api-access/{username}/...`（运营投影，Bearer `PROJECTION_SECRET`）
 - `GET|POST /api/applications`、`PUT|DELETE /api/applications/{id}`、密钥增删；创建密钥只此一次返回 `secret_access_key`
 - `POST /api/sts/credentials`（本仓 JWT 作 session_token，不是 RGW STS）
 - `GET /api/v1/buckets`、`GET /api/v1/buckets/{name}`、`GET .../objects`、`POST /api/v1/uploads/presign`、`POST /api/v1/downloads/presign`、`POST /api/v1/sts/credentials`（`Authorization: OSSAccessKey id:secret` 或 `OSSSession id:secret:token`）
@@ -49,7 +50,6 @@ go run ./cmd/worker
 - `GET /api/stats/traffic`、`GET /api/stats/buckets/requests`（无访问日志时全 0）
 - `GET /api/audit-logs`、`GET /api/audit-logs/export`（CSV 中文表头；`tenant_admin` / `audit_user` / `audit` 动作）
 - `GET /api/alerts/notifications`（只读 `alert_events`，规则引擎在运营侧）
-- `PUT|DELETE /internal/accounts/{username}`、`PUT /internal/accounts/{username}/buckets`（运营投影，Bearer `PROJECTION_SECRET`）
 
 无 `S3_ENDPOINT` / `RGW_ACCESS_KEY` / `RGW_SECRET_KEY` 时上传下载返回 503。
 

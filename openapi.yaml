@@ -238,6 +238,46 @@ paths:
           description: replaced
         "404":
           description: account missing
+  /internal/api-access:
+    get:
+      summary: List tenant Open API access requests for ops
+      responses:
+        "200":
+          description: items and total
+        "401":
+          description: bad projection secret
+  /internal/api-access/{username}:
+    get:
+      summary: Get Open API access for a tenant username
+      responses:
+        "200":
+          description: access record
+        "404":
+          description: not found
+  /internal/api-access/{username}/approve:
+    post:
+      summary: Approve a pending Open API access request
+      responses:
+        "200":
+          description: approved
+        "409":
+          description: not pending
+  /internal/api-access/{username}/reject:
+    post:
+      summary: Reject a pending Open API access request
+      responses:
+        "200":
+          description: rejected
+        "409":
+          description: not pending
+  /internal/api-access/{username}/disable:
+    post:
+      summary: Disable approved Open API access
+      responses:
+        "200":
+          description: disabled
+        "409":
+          description: not approved
   /api/versions:
     get:
       summary: List archived versions of an object

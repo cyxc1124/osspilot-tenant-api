@@ -168,7 +168,7 @@ func main() {
 		ObjectHTTPDomain:  cfg.ObjectHTTPDomain,
 		ObjectHTTPSDomain: cfg.ObjectHTTPSDomain,
 	})
-	projectH := project.NewHandler(cfg.ProjectionSecret, authStore, bucketStore)
+	projectH := project.NewHandler(cfg.ProjectionSecret, authStore, bucketStore, credsStore)
 	versionH := versions.NewHandler(versionStore, bucketStore, s3c, authH.RequireUser, ac)
 	shareH := share.NewHandler(shareStore, bucketStore, s3c, authH.RequireUser, ac, auditLog)
 	editH := edit.NewHandler(editStore, bucketStore, versionStore, settingsStore, s3c, authH.RequireUser, edit.OfficeEnv{
