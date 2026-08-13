@@ -8,6 +8,7 @@ CREATE TABLE tenant_users (
     phone           VARCHAR(32),
     status          VARCHAR(32)  NOT NULL DEFAULT 'active',
     role            VARCHAR(32)  NOT NULL DEFAULT 'normal_user',
+    must_change_password BOOLEAN NOT NULL DEFAULT false,
     last_login_at   TIMESTAMPTZ,
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now()
