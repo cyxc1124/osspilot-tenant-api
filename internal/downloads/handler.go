@@ -8,6 +8,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
@@ -15,10 +16,11 @@ type Handler struct {
 	s3      *storage.Client
 	buckets *bucket.Store
 	protect func(auth.UserHandler) http.HandlerFunc
+	ac      *rbac.Checker
 }
 
-func NewHandler(s3 *storage.Client, buckets *bucket.Store, protect func(auth.UserHandler) http.HandlerFunc) *Handler {
-	return &Handler{s3: s3, buckets: buckets, protect: protect}
+func NewHandler(s3 *storage.Client, buckets *bucket.Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker) *Handler {
+	return &Handler{s3: s3, buckets: buckets, protect: protect, ac: ac}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -46,7 +48,7 @@ func (h *Handler) presign(w http.ResponseWriter, r *http.Request, user *auth.Use
 		httpx.Error(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	url, expires, err := h.one(r, user.ID, req.BucketName, req.ObjectKey)
+	url, expires, err := h.one(w, r, user, req.BucketName, req.ObjectKey)
 	if err != nil {
 		h.writeErr(w, err)
 		return
@@ -68,13 +70,8 @@ func (h *Handler) batch(w http.ResponseWriter, r *http.Request, user *auth.User)
 		httpx.Error(w, http.StatusBadRequest, "keys must contain 1-1000 items")
 		return
 	}
-	b, err := h.buckets.GetVisible(r.Context(), user.ID, req.BucketName)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "database error")
-		return
-	}
-	if b == nil {
-		httpx.Error(w, http.StatusNotFound, "Bucket not found")
+	b, ok := h.see(w, r, user, req.BucketName, "")
+	if !ok {
 		return
 	}
 	seen := map[string]bool{}
@@ -85,7 +82,7 @@ func (h *Handler) batch(w http.ResponseWriter, r *http.Request, user *auth.User)
 			continue
 		}
 		seen[key] = true
-		url, exp, err := h.one(r, user.ID, req.BucketName, key)
+		url, exp, err := h.presignKey(r, user, b.BucketName, key)
 		if err != nil {
 			items = append(items, map[string]any{"key": key, "download_url": nil, "error": err.Error()})
 			continue
@@ -96,16 +93,13 @@ func (h *Handler) batch(w http.ResponseWriter, r *http.Request, user *auth.User)
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items, "expires_in": expires})
 }
 
-func (h *Handler) one(r *http.Request, userID int64, bucketName, key string) (string, int, error) {
+func (h *Handler) one(w http.ResponseWriter, r *http.Request, user *auth.User, bucketName, key string) (string, int, error) {
 	if !objects.ValidUserKey(key) {
 		return "", 0, badRequest("Invalid object key")
 	}
-	b, err := h.buckets.GetVisible(r.Context(), userID, bucketName)
-	if err != nil {
-		return "", 0, err
-	}
-	if b == nil {
-		return "", 0, notFound("Bucket not found")
+	b, ok := h.see(w, r, user, bucketName, key)
+	if !ok {
+		return "", 0, errSilent
 	}
 	if _, err := h.s3.HeadObject(r.Context(), b.BucketName, key); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -120,6 +114,32 @@ func (h *Handler) one(r *http.Request, userID int64, bucketName, key string) (st
 	return url, expires, nil
 }
 
+func (h *Handler) presignKey(r *http.Request, user *auth.User, bucketName, key string) (string, int, error) {
+	if !objects.ValidUserKey(key) {
+		return "", 0, badRequest("Invalid object key")
+	}
+	if h.ac != nil {
+		ok, err := h.ac.Allow(r.Context(), user, bucketName, key, rbac.ActionRead)
+		if err != nil {
+			return "", 0, errors.New("database error")
+		}
+		if !ok {
+			return "", 0, statusError{http.StatusForbidden, "Permission denied"}
+		}
+	}
+	if _, err := h.s3.HeadObject(r.Context(), bucketName, key); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return "", 0, notFound("Object not found")
+		}
+		return "", 0, errors.New("storage error")
+	}
+	url, expires, err := h.s3.PresignGet(r.Context(), bucketName, key)
+	if err != nil {
+		return "", 0, errors.New("storage error")
+	}
+	return url, expires, nil
+}
+
 type statusError struct {
 	status int
 	msg    string
@@ -127,10 +147,31 @@ type statusError struct {
 
 func (e statusError) Error() string { return e.msg }
 
+var errSilent = errors.New("written")
+
 func badRequest(msg string) error { return statusError{http.StatusBadRequest, msg} }
 func notFound(msg string) error   { return statusError{http.StatusNotFound, msg} }
 
+func (h *Handler) see(w http.ResponseWriter, r *http.Request, user *auth.User, name, key string) (*bucket.Bucket, bool) {
+	b, err := h.buckets.GetVisible(r.Context(), auth.AccountID(user), name)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return nil, false
+	}
+	if b == nil {
+		httpx.Error(w, http.StatusNotFound, "Bucket not found")
+		return nil, false
+	}
+	if h.ac.Forbidden(w, r, user, b.BucketName, key, rbac.ActionRead) {
+		return nil, false
+	}
+	return b, true
+}
+
 func (h *Handler) writeErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, errSilent) {
+		return
+	}
 	var se statusError
 	if errors.As(err, &se) {
 		httpx.Error(w, se.status, se.msg)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
@@ -19,12 +20,12 @@ type trashItem struct {
 }
 
 func (h *Handler) listTrash(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	b, ok := h.bucket(w, r, user)
+	q := r.URL.Query()
+	prefix := q.Get("prefix")
+	b, ok := h.bucket(w, r, user, rbac.ActionRead, prefix)
 	if !ok {
 		return
 	}
-	q := r.URL.Query()
-	prefix := q.Get("prefix")
 	after := q.Get("continuation_token")
 	maxKeys := defaultMaxKeys
 	if raw := q.Get("max_keys"); raw != "" {
@@ -94,7 +95,11 @@ func (h *Handler) runTrashOp(w http.ResponseWriter, r *http.Request, user *auth.
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	b, ok := h.bucket(w, r, user)
+	action := rbac.ActionDelete
+	if restore {
+		action = rbac.ActionRestore
+	}
+	b, ok := h.bucket(w, r, user, action, "")
 	if !ok {
 		return
 	}

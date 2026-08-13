@@ -10,6 +10,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
@@ -18,10 +19,11 @@ type Handler struct {
 	buckets *bucket.Store
 	s3      *storage.Client
 	protect func(auth.UserHandler) http.HandlerFunc
+	ac      *rbac.Checker
 }
 
-func NewHandler(store *Store, buckets *bucket.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc) *Handler {
-	return &Handler{store: store, buckets: buckets, s3: s3, protect: protect}
+func NewHandler(store *Store, buckets *bucket.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker) *Handler {
+	return &Handler{store: store, buckets: buckets, s3: s3, protect: protect, ac: ac}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -210,7 +212,7 @@ func (h *Handler) load(w http.ResponseWriter, r *http.Request, user *auth.User) 
 }
 
 func (h *Handler) visible(w http.ResponseWriter, r *http.Request, user *auth.User, name string) bool {
-	b, err := h.buckets.GetVisible(r.Context(), user.ID, name)
+	b, err := h.buckets.GetVisible(r.Context(), auth.AccountID(user), name)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return false
@@ -219,7 +221,7 @@ func (h *Handler) visible(w http.ResponseWriter, r *http.Request, user *auth.Use
 		httpx.Error(w, http.StatusNotFound, "Bucket not found")
 		return false
 	}
-	return true
+	return !h.ac.Forbidden(w, r, user, b.BucketName, "", rbac.ActionRead)
 }
 
 func (h *Handler) requireS3(w http.ResponseWriter) bool {

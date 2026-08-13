@@ -10,6 +10,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
@@ -36,7 +37,7 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request, user *auth.User
 			return
 		}
 	}
-	b, ok := h.bucket(w, r, user)
+	b, ok := h.bucket(w, r, user, rbac.ActionDelete, "")
 	if !ok {
 		return
 	}

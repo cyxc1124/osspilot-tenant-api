@@ -18,44 +18,62 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/project"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/share"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/uploads"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/versions"
 )
 
-func newMux(authH *auth.Handler, bucketH *bucket.Handler, objectH *objects.Handler, uploadH *uploads.Handler, downloadH *downloads.Handler, platformH *platform.Handler, projectH *project.Handler, versionH *versions.Handler, shareH *share.Handler, editH *edit.Handler) http.Handler {
+type apiHandlers struct {
+	auth      *auth.Handler
+	bucket    *bucket.Handler
+	objects   *objects.Handler
+	uploads   *uploads.Handler
+	downloads *downloads.Handler
+	platform  *platform.Handler
+	project   *project.Handler
+	versions  *versions.Handler
+	share     *share.Handler
+	edit      *edit.Handler
+	rbac      *rbac.Handler
+}
+
+func newMux(h apiHandlers) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
-	if authH != nil {
-		authH.Register(mux)
+	if h.auth != nil {
+		h.auth.Register(mux)
 	}
-	if bucketH != nil {
-		bucketH.Register(mux)
+	if h.bucket != nil {
+		h.bucket.Register(mux)
 	}
-	if objectH != nil {
-		objectH.Register(mux)
+	if h.objects != nil {
+		h.objects.Register(mux)
 	}
-	if uploadH != nil {
-		uploadH.Register(mux)
+	if h.uploads != nil {
+		h.uploads.Register(mux)
 	}
-	if downloadH != nil {
-		downloadH.Register(mux)
+	if h.downloads != nil {
+		h.downloads.Register(mux)
 	}
-	if platformH != nil {
-		platformH.Register(mux)
+	if h.platform != nil {
+		h.platform.Register(mux)
 	}
-	if projectH != nil {
-		projectH.Register(mux)
+	if h.project != nil {
+		h.project.Register(mux)
 	}
-	if versionH != nil {
-		versionH.Register(mux)
+	if h.versions != nil {
+		h.versions.Register(mux)
 	}
-	if shareH != nil {
-		shareH.Register(mux)
+	if h.share != nil {
+		h.share.Register(mux)
 	}
-	if editH != nil {
-		editH.Register(mux)
+	if h.edit != nil {
+		h.edit.Register(mux)
+	}
+	if h.rbac != nil {
+		h.rbac.Register(mux)
 	}
 	return httpx.CORS(mux)
 }
@@ -79,6 +97,7 @@ func main() {
 	var versionStore *versions.Store
 	var shareStore *share.Store
 	var editStore *edit.Store
+	var rbacStore *rbac.Store
 	if cfg.DatabaseURL != "" {
 		pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
 		if err != nil {
@@ -94,6 +113,7 @@ func main() {
 		versionStore = versions.NewStore(pool)
 		shareStore = share.NewStore(pool)
 		editStore = edit.NewStore(pool)
+		rbacStore = rbac.NewStore(pool)
 	} else {
 		slog.Warn("DATABASE_URL unset; auth routes return 503")
 	}
@@ -112,10 +132,12 @@ func main() {
 	}
 
 	authH := auth.NewHandler(authStore, cfg.JWTSecret, cfg.TokenTTL)
-	bucketH := bucket.NewHandler(bucketStore, authH.RequireUser, s3c, cfg.CORSOrigins)
-	objectH := objects.NewHandler(bucketStore, objectStore, s3c, authH.RequireUser)
-	uploadH := uploads.NewHandler(s3c, bucketStore, objectStore, uploadStore, authH.RequireUser)
-	downloadH := downloads.NewHandler(s3c, bucketStore, authH.RequireUser)
+	rbacH := rbac.NewHandler(authStore, rbacStore, bucketStore, authH.RequireUser)
+	ac := rbacH.Checker()
+	bucketH := bucket.NewHandler(bucketStore, authH.RequireUser, s3c, cfg.CORSOrigins, ac)
+	objectH := objects.NewHandler(bucketStore, objectStore, s3c, authH.RequireUser, ac)
+	uploadH := uploads.NewHandler(s3c, bucketStore, objectStore, uploadStore, authH.RequireUser, ac)
+	downloadH := downloads.NewHandler(s3c, bucketStore, authH.RequireUser, ac)
 	platformH := platform.NewHandler(settingsStore, authH.RequireUser, platform.Fallbacks{
 		S3Endpoint:        cfg.S3Endpoint,
 		DownloadCDNURL:    cfg.DownloadCDNURL,
@@ -124,17 +146,20 @@ func main() {
 		ObjectHTTPSDomain: cfg.ObjectHTTPSDomain,
 	})
 	projectH := project.NewHandler(cfg.ProjectionSecret, authStore, bucketStore)
-	versionH := versions.NewHandler(versionStore, bucketStore, s3c, authH.RequireUser)
-	shareH := share.NewHandler(shareStore, bucketStore, s3c, authH.RequireUser)
+	versionH := versions.NewHandler(versionStore, bucketStore, s3c, authH.RequireUser, ac)
+	shareH := share.NewHandler(shareStore, bucketStore, s3c, authH.RequireUser, ac)
 	editH := edit.NewHandler(editStore, bucketStore, versionStore, settingsStore, s3c, authH.RequireUser, edit.OfficeEnv{
 		URL: cfg.OfficeURL, JWTSecret: cfg.OfficeJWTSecret, PublicURL: cfg.PublicURL,
-	})
+	}, ac)
 	if cfg.ProjectionSecret == "" {
 		slog.Warn("PROJECTION_SECRET unset; internal projection routes return 503")
 	}
 	addr := cfg.HTTPAddr
 	slog.Info("listen", "addr", addr)
-	if err := http.ListenAndServe(addr, newMux(authH, bucketH, objectH, uploadH, downloadH, platformH, projectH, versionH, shareH, editH)); err != nil {
+	if err := http.ListenAndServe(addr, newMux(apiHandlers{
+		auth: authH, bucket: bucketH, objects: objectH, uploads: uploadH, downloads: downloadH,
+		platform: platformH, project: projectH, versions: versionH, share: shareH, edit: editH, rbac: rbacH,
+	})); err != nil {
 		slog.Error("server", "err", err)
 		os.Exit(1)
 	}

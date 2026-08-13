@@ -9,6 +9,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
@@ -18,10 +19,11 @@ type Handler struct {
 	objects *objects.Store
 	tasks   *Store
 	protect func(auth.UserHandler) http.HandlerFunc
+	ac      *rbac.Checker
 }
 
-func NewHandler(s3 *storage.Client, buckets *bucket.Store, objects *objects.Store, tasks *Store, protect func(auth.UserHandler) http.HandlerFunc) *Handler {
-	return &Handler{s3: s3, buckets: buckets, objects: objects, tasks: tasks, protect: protect}
+func NewHandler(s3 *storage.Client, buckets *bucket.Store, objects *objects.Store, tasks *Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker) *Handler {
+	return &Handler{s3: s3, buckets: buckets, objects: objects, tasks: tasks, protect: protect, ac: ac}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -88,7 +90,7 @@ func (h *Handler) presign(w http.ResponseWriter, r *http.Request, user *auth.Use
 		httpx.Error(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	b, ct, ok := h.prepare(w, r, user.ID, req.BucketName, req.ObjectKey, req.Size, req.ContentType)
+	b, ct, ok := h.prepare(w, r, user, req.BucketName, req.ObjectKey, req.Size, req.ContentType)
 	if !ok {
 		return
 	}
@@ -132,7 +134,7 @@ func (h *Handler) mpInit(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	b, ct, ok := h.prepare(w, r, user.ID, req.BucketName, req.ObjectKey, req.Size, req.ContentType)
+	b, ct, ok := h.prepare(w, r, user, req.BucketName, req.ObjectKey, req.Size, req.ContentType)
 	if !ok {
 		return
 	}
@@ -158,7 +160,7 @@ func (h *Handler) mpParts(w http.ResponseWriter, r *http.Request, user *auth.Use
 		httpx.Error(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	if _, ok := h.bucketOK(w, r, user.ID, req.BucketName); !ok {
+	if _, ok := h.bucketOK(w, r, user, req.BucketName, req.ObjectKey); !ok {
 		return
 	}
 	task, ok := h.pending(w, r, user.ID, req.TaskID, req.BucketName, req.ObjectKey, TypeMultipart)
@@ -230,13 +232,8 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request, user *auth.Us
 		httpx.Error(w, http.StatusBadRequest, "Invalid object key")
 		return
 	}
-	b, err := h.buckets.GetVisible(r.Context(), user.ID, bucketName)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "database error")
-		return
-	}
-	if b == nil {
-		httpx.Error(w, http.StatusNotFound, "Bucket not found")
+	b, ok := h.see(w, r, user, bucketName, key)
+	if !ok {
 		return
 	}
 	task, ok := h.pending(w, r, user.ID, taskID, bucketName, key, uploadType)
@@ -274,7 +271,7 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request, user *auth.Us
 	})
 }
 
-func (h *Handler) prepare(w http.ResponseWriter, r *http.Request, userID int64, bucketName, key string, size int64, contentType *string) (*bucket.Bucket, string, bool) {
+func (h *Handler) prepare(w http.ResponseWriter, r *http.Request, user *auth.User, bucketName, key string, size int64, contentType *string) (*bucket.Bucket, string, bool) {
 	if !objects.ValidUserKey(key) {
 		httpx.Error(w, http.StatusBadRequest, "Invalid object key")
 		return nil, "", false
@@ -283,13 +280,8 @@ func (h *Handler) prepare(w http.ResponseWriter, r *http.Request, userID int64, 
 		httpx.Error(w, http.StatusBadRequest, "size must be greater than 0")
 		return nil, "", false
 	}
-	b, err := h.buckets.GetVisible(r.Context(), userID, bucketName)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "database error")
-		return nil, "", false
-	}
-	if b == nil {
-		httpx.Error(w, http.StatusNotFound, "Bucket not found")
+	b, ok := h.see(w, r, user, bucketName, key)
+	if !ok {
 		return nil, "", false
 	}
 	ct := ""
@@ -299,14 +291,21 @@ func (h *Handler) prepare(w http.ResponseWriter, r *http.Request, userID int64, 
 	return b, ct, true
 }
 
-func (h *Handler) bucketOK(w http.ResponseWriter, r *http.Request, userID int64, name string) (*bucket.Bucket, bool) {
-	b, err := h.buckets.GetVisible(r.Context(), userID, name)
+func (h *Handler) bucketOK(w http.ResponseWriter, r *http.Request, user *auth.User, name, key string) (*bucket.Bucket, bool) {
+	return h.see(w, r, user, name, key)
+}
+
+func (h *Handler) see(w http.ResponseWriter, r *http.Request, user *auth.User, name, key string) (*bucket.Bucket, bool) {
+	b, err := h.buckets.GetVisible(r.Context(), auth.AccountID(user), name)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return nil, false
 	}
 	if b == nil {
 		httpx.Error(w, http.StatusNotFound, "Bucket not found")
+		return nil, false
+	}
+	if h.ac.Forbidden(w, r, user, b.BucketName, key, rbac.ActionWrite) {
 		return nil, false
 	}
 	return b, true

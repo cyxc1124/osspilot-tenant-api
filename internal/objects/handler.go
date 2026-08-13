@@ -11,6 +11,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
@@ -19,10 +20,11 @@ type Handler struct {
 	store   *Store
 	s3      *storage.Client
 	protect func(auth.UserHandler) http.HandlerFunc
+	ac      *rbac.Checker
 }
 
-func NewHandler(buckets *bucket.Store, store *Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc) *Handler {
-	return &Handler{buckets: buckets, store: store, s3: s3, protect: protect}
+func NewHandler(buckets *bucket.Store, store *Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker) *Handler {
+	return &Handler{buckets: buckets, store: store, s3: s3, protect: protect, ac: ac}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -61,12 +63,12 @@ type detail struct {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	b, ok := h.bucket(w, r, user)
+	q := r.URL.Query()
+	prefix := q.Get("prefix")
+	b, ok := h.bucket(w, r, user, rbac.ActionRead, prefix)
 	if !ok {
 		return
 	}
-	q := r.URL.Query()
-	prefix := q.Get("prefix")
 	after := q.Get("continuation_token")
 	maxKeys := defaultMaxKeys
 	if raw := q.Get("max_keys"); raw != "" {
@@ -110,7 +112,7 @@ func (h *Handler) detail(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusBadRequest, "Invalid object key")
 		return
 	}
-	b, ok := h.bucket(w, r, user)
+	b, ok := h.bucket(w, r, user, rbac.ActionRead, key)
 	if !ok {
 		return
 	}
@@ -160,7 +162,7 @@ func (h *Handler) mkdir(w http.ResponseWriter, r *http.Request, user *auth.User)
 		httpx.Error(w, http.StatusBadRequest, "Invalid directory key")
 		return
 	}
-	b, ok := h.bucket(w, r, user)
+	b, ok := h.bucket(w, r, user, rbac.ActionWrite, key)
 	if !ok {
 		return
 	}
@@ -184,14 +186,17 @@ func (h *Handler) mkdir(w http.ResponseWriter, r *http.Request, user *auth.User)
 	httpx.JSON(w, http.StatusOK, map[string]any{"key": key, "size": 0, "last_modified": ts})
 }
 
-func (h *Handler) bucket(w http.ResponseWriter, r *http.Request, user *auth.User) (*bucket.Bucket, bool) {
-	b, err := h.buckets.GetVisible(r.Context(), user.ID, r.PathValue("bucket_name"))
+func (h *Handler) bucket(w http.ResponseWriter, r *http.Request, user *auth.User, action, prefix string) (*bucket.Bucket, bool) {
+	b, err := h.buckets.GetVisible(r.Context(), auth.AccountID(user), r.PathValue("bucket_name"))
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return nil, false
 	}
 	if b == nil {
 		httpx.Error(w, http.StatusNotFound, "Bucket not found")
+		return nil, false
+	}
+	if h.ac.Forbidden(w, r, user, b.BucketName, prefix, action) {
 		return nil, false
 	}
 	return b, true

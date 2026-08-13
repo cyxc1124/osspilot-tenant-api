@@ -7,6 +7,7 @@ import (
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
@@ -15,10 +16,11 @@ type Handler struct {
 	s3          *storage.Client
 	protect     func(auth.UserHandler) http.HandlerFunc
 	corsOrigins []string
+	ac          *rbac.Checker
 }
 
-func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, s3 *storage.Client, corsOrigins []string) *Handler {
-	return &Handler{store: store, protect: protect, s3: s3, corsOrigins: corsOrigins}
+func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, s3 *storage.Client, corsOrigins []string, ac *rbac.Checker) *Handler {
+	return &Handler{store: store, protect: protect, s3: s3, corsOrigins: corsOrigins, ac: ac}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -88,10 +90,24 @@ type detail struct {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	items, err := h.store.List(r.Context(), user.ID)
+	items, err := h.store.List(r.Context(), auth.AccountID(user))
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
+	}
+	if !auth.IsAdmin(user) && h.ac != nil {
+		filtered := make([]Bucket, 0, len(items))
+		for _, b := range items {
+			ok, err := h.ac.Allow(r.Context(), user, b.BucketName, "", rbac.ActionRead)
+			if err != nil {
+				httpx.Error(w, http.StatusInternalServerError, "database error")
+				return
+			}
+			if ok {
+				filtered = append(filtered, b)
+			}
+		}
+		items = filtered
 	}
 	out := make([]summary, 0, len(items))
 	for _, b := range items {
@@ -108,6 +124,9 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 	}
 	if err := validateName(req.BucketName); err != nil {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if h.ac.Forbidden(w, r, user, "", "", rbac.ActionBucketCreate) {
 		return
 	}
 	if err := h.validateLogging(w, r, user, req.AccessLoggingEnabled, req.AccessLogTargetBucket, req.BucketName); err != nil {
@@ -137,7 +156,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
-	if err := h.store.GrantLocal(r.Context(), user.ID, b.ID); err != nil {
+	if err := h.store.GrantLocal(r.Context(), auth.AccountID(user), b.ID); err != nil {
 		_ = h.store.Delete(r.Context(), b.ID)
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
@@ -169,7 +188,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	b, ok := h.load(w, r, user)
+	b, ok := h.load(w, r, user, rbac.ActionRead)
 	if !ok {
 		return
 	}
@@ -177,7 +196,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request, user *auth.User) {
 }
 
 func (h *Handler) update(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	b, ok := h.load(w, r, user)
+	b, ok := h.load(w, r, user, rbac.ActionAdmin)
 	if !ok {
 		return
 	}
@@ -236,7 +255,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, user *auth.User
 }
 
 func (h *Handler) remove(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	b, ok := h.load(w, r, user)
+	b, ok := h.load(w, r, user, rbac.ActionBucketDelete)
 	if !ok {
 		return
 	}
@@ -259,15 +278,17 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request, user *auth.User
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) load(w http.ResponseWriter, r *http.Request, user *auth.User) (*Bucket, bool) {
-	name := r.PathValue("bucket_name")
-	b, err := h.store.GetVisible(r.Context(), user.ID, name)
+func (h *Handler) load(w http.ResponseWriter, r *http.Request, user *auth.User, action string) (*Bucket, bool) {
+	b, err := h.store.GetVisible(r.Context(), auth.AccountID(user), r.PathValue("bucket_name"))
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return nil, false
 	}
 	if b == nil {
 		httpx.Error(w, http.StatusNotFound, "Bucket not found")
+		return nil, false
+	}
+	if h.ac.Forbidden(w, r, user, b.BucketName, "", action) {
 		return nil, false
 	}
 	return b, true
@@ -285,7 +306,7 @@ func (h *Handler) validateLogging(w http.ResponseWriter, r *http.Request, user *
 		httpx.Error(w, http.StatusBadRequest, "Access log target bucket must differ from the source bucket")
 		return errLogging
 	}
-	other, err := h.store.GetVisible(r.Context(), user.ID, *target)
+	other, err := h.store.GetVisible(r.Context(), auth.AccountID(user), *target)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return errLogging

@@ -5,10 +5,11 @@ import (
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 )
 
 func (h *Handler) getPolicy(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	b, ok := h.load(w, r, user)
+	b, ok := h.load(w, r, user, rbac.ActionAdmin)
 	if !ok {
 		return
 	}
@@ -28,7 +29,7 @@ func (h *Handler) getPolicy(w http.ResponseWriter, r *http.Request, user *auth.U
 }
 
 func (h *Handler) putPolicy(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	b, ok := h.load(w, r, user)
+	b, ok := h.load(w, r, user, rbac.ActionAdmin)
 	if !ok {
 		return
 	}
@@ -58,7 +59,7 @@ func (h *Handler) putPolicy(w http.ResponseWriter, r *http.Request, user *auth.U
 }
 
 func (h *Handler) deletePolicy(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	b, ok := h.load(w, r, user)
+	b, ok := h.load(w, r, user, rbac.ActionAdmin)
 	if !ok {
 		return
 	}
@@ -73,7 +74,7 @@ func (h *Handler) deletePolicy(w http.ResponseWriter, r *http.Request, user *aut
 }
 
 func (h *Handler) getCors(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	b, ok := h.load(w, r, user)
+	b, ok := h.load(w, r, user, rbac.ActionAdmin)
 	if !ok {
 		return
 	}
@@ -97,7 +98,7 @@ func (h *Handler) getCors(w http.ResponseWriter, r *http.Request, user *auth.Use
 }
 
 func (h *Handler) putCors(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	b, ok := h.load(w, r, user)
+	b, ok := h.load(w, r, user, rbac.ActionAdmin)
 	if !ok {
 		return
 	}
@@ -128,7 +129,7 @@ func (h *Handler) putCors(w http.ResponseWriter, r *http.Request, user *auth.Use
 }
 
 func (h *Handler) deleteCors(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	b, ok := h.load(w, r, user)
+	b, ok := h.load(w, r, user, rbac.ActionAdmin)
 	if !ok {
 		return
 	}

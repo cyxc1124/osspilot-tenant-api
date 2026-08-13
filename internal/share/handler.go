@@ -11,6 +11,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
@@ -19,10 +20,11 @@ type Handler struct {
 	buckets *bucket.Store
 	s3      *storage.Client
 	protect func(auth.UserHandler) http.HandlerFunc
+	ac      *rbac.Checker
 }
 
-func NewHandler(store *Store, buckets *bucket.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc) *Handler {
-	return &Handler{store: store, buckets: buckets, s3: s3, protect: protect}
+func NewHandler(store *Store, buckets *bucket.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker) *Handler {
+	return &Handler{store: store, buckets: buckets, s3: s3, protect: protect, ac: ac}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -119,13 +121,8 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusBadRequest, "expires_at must be in the future")
 		return
 	}
-	b, err := h.buckets.GetVisible(r.Context(), user.ID, req.BucketName)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "database error")
-		return
-	}
-	if b == nil {
-		httpx.Error(w, http.StatusNotFound, "Bucket not found")
+	b, ok := h.see(w, r, user, req.BucketName, req.ObjectKey, rbac.ActionShare)
+	if !ok {
 		return
 	}
 	if _, err := h.s3.HeadObject(r.Context(), b.BucketName, req.ObjectKey); err != nil {
@@ -137,7 +134,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 		return
 	}
 	link := &Link{
-		AccountID:      user.ID, // ponytail: T11 splits tenant account from member users
+		AccountID:      auth.AccountID(user),
 		BucketName:     b.BucketName,
 		ObjectKey:      req.ObjectKey,
 		CreatedBy:      user.ID,
@@ -177,18 +174,13 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request, user *auth.User) 
 	bucketName := q.Get("bucket_name")
 	objectKey := q.Get("object_key")
 	if bucketName != "" {
-		b, err := h.buckets.GetVisible(r.Context(), user.ID, bucketName)
-		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "database error")
-			return
-		}
-		if b == nil {
-			httpx.Error(w, http.StatusNotFound, "Bucket not found")
+		b, ok := h.see(w, r, user, bucketName, objectKey, rbac.ActionShare)
+		if !ok {
 			return
 		}
 		bucketName = b.BucketName
 	}
-	rows, err := h.store.List(r.Context(), user.ID, bucketName, objectKey)
+	rows, err := h.store.List(r.Context(), auth.AccountID(user), bucketName, objectKey)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
@@ -219,7 +211,7 @@ func (h *Handler) revoke(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusNotFound, "Share link not found")
 		return
 	}
-	if link.AccountID != user.ID {
+	if link.AccountID != auth.AccountID(user) {
 		httpx.Error(w, http.StatusForbidden, "Tenant access denied")
 		return
 	}
@@ -354,4 +346,20 @@ func formatTime(t *time.Time) *string {
 	}
 	s := t.UTC().Format(time.RFC3339)
 	return &s
+}
+
+func (h *Handler) see(w http.ResponseWriter, r *http.Request, user *auth.User, name, key, action string) (*bucket.Bucket, bool) {
+	b, err := h.buckets.GetVisible(r.Context(), auth.AccountID(user), name)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return nil, false
+	}
+	if b == nil {
+		httpx.Error(w, http.StatusNotFound, "Bucket not found")
+		return nil, false
+	}
+	if h.ac.Forbidden(w, r, user, b.BucketName, key, action) {
+		return nil, false
+	}
+	return b, true
 }

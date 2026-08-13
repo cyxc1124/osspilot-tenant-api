@@ -65,7 +65,7 @@ func (h *Handler) config(w http.ResponseWriter, r *http.Request, user *auth.User
 		return
 	}
 	httpx.JSON(w, http.StatusOK, configResponse{
-		TenantID:            user.ID,
+		TenantID:            auth.AccountID(user),
 		StorageRegion:       nil, // ponytail: until O3/O4 projects regions
 		S3Endpoint:          pickPtr(rows, "s3_endpoint", h.fallbacks.S3Endpoint),
 		DownloadCDNURL:      pickPtr(rows, "download_cdn_url", h.fallbacks.DownloadCDNURL),

@@ -12,6 +12,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/versions"
 )
@@ -32,15 +33,16 @@ type Handler struct {
 	s3       *storage.Client
 	protect  func(auth.UserHandler) http.HandlerFunc
 	office   OfficeEnv
+	ac       *rbac.Checker
 }
 
-func NewHandler(store *Store, buckets *bucket.Store, versions *versions.Store, settings *platform.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, office OfficeEnv) *Handler {
+func NewHandler(store *Store, buckets *bucket.Store, versions *versions.Store, settings *platform.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, office OfficeEnv, ac *rbac.Checker) *Handler {
 	office.URL = strings.TrimRight(office.URL, "/")
 	office.PublicURL = strings.TrimRight(office.PublicURL, "/")
 	if office.PublicURL == "" {
 		office.PublicURL = "http://localhost:8000"
 	}
-	return &Handler{store: store, buckets: buckets, versions: versions, settings: settings, s3: s3, protect: protect, office: office}
+	return &Handler{store: store, buckets: buckets, versions: versions, settings: settings, s3: s3, protect: protect, office: office, ac: ac}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -79,13 +81,16 @@ func (h *Handler) visible(w http.ResponseWriter, r *http.Request, user *auth.Use
 		httpx.Error(w, http.StatusBadRequest, "Invalid object key")
 		return nil, false
 	}
-	b, err := h.buckets.GetVisible(r.Context(), user.ID, name)
+	b, err := h.buckets.GetVisible(r.Context(), auth.AccountID(user), name)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return nil, false
 	}
 	if b == nil {
 		httpx.Error(w, http.StatusNotFound, "Bucket not found")
+		return nil, false
+	}
+	if h.ac.Forbidden(w, r, user, b.BucketName, key, rbac.ActionEdit) {
 		return nil, false
 	}
 	return b, true

@@ -386,3 +386,153 @@ paths:
       responses:
         "200":
           description: unlocked
+  /api/roles:
+    get:
+      summary: List tenant role catalog
+      responses:
+        "200":
+          description: items
+  /api/users:
+    get:
+      summary: List users in the current account
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create a member user
+      responses:
+        "201":
+          description: created
+  /api/users/{user_id}:
+    get:
+      summary: Get a member user
+      responses:
+        "200":
+          description: summary
+    put:
+      summary: Update a member user
+      responses:
+        "200":
+          description: summary
+    delete:
+      summary: Delete a member user
+      responses:
+        "200":
+          description: deleted summary
+  /api/user-groups:
+    get:
+      summary: List user groups
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create a user group
+      responses:
+        "201":
+          description: created
+  /api/user-groups/{group_id}:
+    get:
+      summary: Get a user group
+      responses:
+        "200":
+          description: group
+    put:
+      summary: Update a user group
+      responses:
+        "200":
+          description: group
+    delete:
+      summary: Delete a user group
+      responses:
+        "200":
+          description: deleted group
+  /api/user-groups/{group_id}/members:
+    post:
+      summary: Add group members
+      responses:
+        "200":
+          description: group
+  /api/user-groups/{group_id}/members/{user_id}:
+    delete:
+      summary: Remove a group member
+      responses:
+        "200":
+          description: group
+  /api/permissions:
+    get:
+      summary: List permission rules
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create a permission rule
+      responses:
+        "201":
+          description: created
+  /api/permissions/{permission_id}:
+    put:
+      summary: Update a permission rule
+      responses:
+        "200":
+          description: rule
+    delete:
+      summary: Delete a permission rule
+      responses:
+        "200":
+          description: deleted rule
+  /api/permission-templates:
+    get:
+      summary: List permission templates
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create a permission template
+      responses:
+        "201":
+          description: created
+  /api/permission-templates/{template_id}:
+    get:
+      summary: Get a permission template
+      responses:
+        "200":
+          description: template
+    put:
+      summary: Update a permission template
+      responses:
+        "200":
+          description: template
+    delete:
+      summary: Delete a permission template
+      responses:
+        "200":
+          description: deleted template
+  /api/permission-templates/{template_id}/rules:
+    post:
+      summary: Add a template rule
+      responses:
+        "201":
+          description: created
+  /api/permission-templates/{template_id}/rules/{rule_id}:
+    put:
+      summary: Update a template rule
+      responses:
+        "200":
+          description: rule
+    delete:
+      summary: Delete a template rule
+      responses:
+        "200":
+          description: deleted rule
+  /api/permission-templates/{template_id}/assignments:
+    post:
+      summary: Assign a template to a user or group
+      responses:
+        "201":
+          description: created
+  /api/permission-templates/{template_id}/assignments/{assignment_id}:
+    delete:
+      summary: Remove a template assignment
+      responses:
+        "200":
+          description: deleted assignment
