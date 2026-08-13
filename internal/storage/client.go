@@ -116,13 +116,36 @@ func (c *Client) HeadObject(ctx context.Context, bucket, key string) (ObjectMeta
 	return meta, nil
 }
 
-func (c *Client) PutObject(ctx context.Context, bucket, key string, body io.Reader, contentType string) error {
+func (c *Client) PutObject(ctx context.Context, bucket, key string, body io.Reader, contentType string) (*string, error) {
 	in := &s3.PutObjectInput{Bucket: aws.String(bucket), Key: aws.String(key), Body: body}
 	if contentType != "" {
 		in.ContentType = aws.String(contentType)
 	}
-	_, err := c.s3.PutObject(ctx, in)
-	return err
+	out, err := c.s3.PutObject(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	return stripETag(out.ETag), nil
+}
+
+func (c *Client) GetObject(ctx context.Context, bucket, key string, maxBytes int64) ([]byte, *string, error) {
+	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
+	if err != nil {
+		if isNotFound(err) {
+			return nil, nil, ErrNotFound
+		}
+		return nil, nil, err
+	}
+	defer out.Body.Close()
+	var r io.Reader = out.Body
+	if maxBytes > 0 {
+		r = io.LimitReader(out.Body, maxBytes)
+	}
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return nil, nil, err
+	}
+	return body, out.ContentType, nil
 }
 
 func (c *Client) PresignPut(ctx context.Context, bucket, key, contentType string) (string, int, error) {

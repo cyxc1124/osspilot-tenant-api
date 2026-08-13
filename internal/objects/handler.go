@@ -171,7 +171,7 @@ func (h *Handler) mkdir(w http.ResponseWriter, r *http.Request, user *auth.User)
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
-	if err := h.s3.PutObject(r.Context(), b.BucketName, key, bytes.NewReader(nil), ""); err != nil {
+	if _, err := h.s3.PutObject(r.Context(), b.BucketName, key, bytes.NewReader(nil), ""); err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}

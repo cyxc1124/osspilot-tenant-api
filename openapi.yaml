@@ -304,3 +304,85 @@ paths:
           description: not found
         "410":
           description: expired
+  /api/file-locks/status:
+    get:
+      summary: Current edit lock for an object
+      responses:
+        "200":
+          description: lock state
+  /api/file-locks/lock:
+    post:
+      summary: Acquire or refresh an exclusive edit lock
+      responses:
+        "200":
+          description: acquired or readonly
+  /api/file-locks/refresh:
+    post:
+      summary: Extend lock TTL
+      responses:
+        "200":
+          description: refreshed
+  /api/file-locks/unlock:
+    post:
+      summary: Release an edit lock
+      responses:
+        "200":
+          description: unlocked
+  /api/text-edit/open:
+    post:
+      summary: Open a Monaco text editing session
+      responses:
+        "200":
+          description: content and lock
+  /api/text-edit/{session_id}/save:
+    post:
+      summary: Archive current version then put edited text
+      responses:
+        "200":
+          description: saved
+  /api/text-edit/unlock:
+    post:
+      summary: Release the text-edit lock
+      responses:
+        "200":
+          description: unlocked
+  /api/text-edit/close:
+    post:
+      summary: Close a text session and release its lock
+      responses:
+        "200":
+          description: closed
+  /api/editor/open:
+    post:
+      summary: Open an ONLYOFFICE session for docx/xlsx/pptx
+      responses:
+        "200":
+          description: office_url and config
+        "503":
+          description: OFFICE_URL unset
+  /api/editor/files/{session_id}/download:
+    get:
+      summary: Serve the document to ONLYOFFICE Document Server
+      responses:
+        "200":
+          description: file bytes
+  /api/editor/callback/{session_id}:
+    post:
+      summary: ONLYOFFICE save/status callback
+      responses:
+        "200":
+          description: error code 0 or 1
+  /api/editor/save:
+    post:
+      summary: Latest saved metadata for an office session
+      responses:
+        "200":
+          description: saved
+        "409":
+          description: callback has not saved yet
+  /api/editor/unlock:
+    post:
+      summary: Release an office edit lock
+      responses:
+        "200":
+          description: unlocked

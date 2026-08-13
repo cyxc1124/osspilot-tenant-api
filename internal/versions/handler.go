@@ -176,31 +176,12 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request, user *auth.User
 }
 
 func (h *Handler) archive(r *http.Request, userID int64, bucketName, objectKey, source, remark string) error {
-	meta, err := h.s3.HeadObject(r.Context(), bucketName, objectKey)
-	if err != nil {
-		return err
+	var rem *string
+	if remark != "" {
+		rem = &remark
 	}
-	n, err := h.store.NextNo(r.Context(), bucketName, objectKey)
-	if err != nil {
-		return err
-	}
-	key := storageKey(bucketName, objectKey, n)
-	if _, err := h.s3.CopyObject(r.Context(), bucketName, key, bucketName, objectKey); err != nil {
-		return err
-	}
-	rec := &Record{
-		BucketName: bucketName,
-		ObjectKey:  objectKey,
-		VersionNo:  n,
-		StorageKey: key,
-		Size:       meta.Size,
-		ETag:       meta.ETag,
-		CreatedBy:  userID,
-		CreatedAt:  time.Now(),
-		Source:     source,
-		Remark:     &remark,
-	}
-	return h.store.Insert(r.Context(), rec)
+	_, err := Archive(r.Context(), h.s3, h.store, userID, bucketName, objectKey, source, rem)
+	return err
 }
 
 func (h *Handler) load(w http.ResponseWriter, r *http.Request, user *auth.User) *Record {

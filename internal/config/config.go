@@ -21,6 +21,9 @@ type Config struct {
 	PreviewCDNURL     string
 	ObjectHTTPDomain  string
 	ObjectHTTPSDomain string
+	OfficeURL         string
+	OfficeJWTSecret   string
+	PublicURL         string
 	ProjectionSecret  string
 	CORSOrigins       []string
 }
@@ -28,6 +31,10 @@ type Config struct {
 func Load() Config {
 	secret := getenv("JWT_SECRET", "change-me-in-development")
 	minutes := getenvInt("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 60)
+	officeJWT := os.Getenv("OFFICE_JWT_SECRET")
+	if officeJWT == "" {
+		officeJWT = os.Getenv("ONLYOFFICE_JWT_SECRET")
+	}
 	return Config{
 		HTTPAddr:          getenv("HTTP_ADDR", ":8000"),
 		DatabaseURL:       os.Getenv("DATABASE_URL"),
@@ -42,6 +49,9 @@ func Load() Config {
 		PreviewCDNURL:     os.Getenv("PREVIEW_CDN_URL"),
 		ObjectHTTPDomain:  os.Getenv("OBJECT_HTTP_DOMAIN"),
 		ObjectHTTPSDomain: os.Getenv("OBJECT_HTTPS_DOMAIN"),
+		OfficeURL:         os.Getenv("OFFICE_URL"),
+		OfficeJWTSecret:   officeJWT,
+		PublicURL:         strings.TrimRight(getenv("TENANT_API_PUBLIC_URL", "http://localhost:8000"), "/"),
 		ProjectionSecret:  os.Getenv("PROJECTION_SECRET"),
 		CORSOrigins:       parseOrigins(os.Getenv("TENANT_CORS_ORIGINS")),
 	}
