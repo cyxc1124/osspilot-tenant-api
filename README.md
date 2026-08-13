@@ -44,7 +44,7 @@ go run ./cmd/worker
 - `GET|POST /api/permissions`、`PUT|DELETE /api/permissions/{id}`
 - `GET|POST /api/permission-templates` 及 rules / assignments
 - `GET /api/api-access`、`POST /api/api-access/request`（开通状态；批准走运营 `POST /internal/api-access/{username}/approve`）
-- `PUT|DELETE /internal/accounts/{username}`、`PUT /internal/accounts/{username}/buckets`、`GET /internal/api-access`、`GET|POST /internal/api-access/{username}/...`、`POST /internal/buckets/{bucket_name}/inventory`（运营投影，Bearer `PROJECTION_SECRET`）
+- `PUT|DELETE /internal/accounts/{username}`、`PUT /internal/accounts/{username}/buckets`、`GET /internal/api-access`、`GET|POST /internal/api-access/{username}/...`、`POST /internal/buckets/{bucket_name}/inventory`、`/internal/accounts/{username}/rbac/...`（运营投影，Bearer `PROJECTION_SECRET`）
 - `GET|POST /api/applications`、`PUT|DELETE /api/applications/{id}`、密钥增删；创建密钥只此一次返回 `secret_access_key`
 - `POST /api/sts/credentials`（本仓 JWT 作 session_token，不是 RGW STS）
 - `GET /api/v1/buckets`、`GET /api/v1/buckets/{name}`、`GET .../objects`、`POST /api/v1/uploads/presign`、`POST /api/v1/downloads/presign`、`POST /api/v1/sts/credentials`（`Authorization: OSSAccessKey id:secret` 或 `OSSSession id:secret:token`）

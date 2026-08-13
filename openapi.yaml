@@ -338,6 +338,41 @@ paths:
           description: bad projection secret
         "503":
           description: queue unavailable
+  /internal/accounts/{username}/rbac/user-groups:
+    get:
+      summary: List user groups for a projected account (ops proxy)
+      responses:
+        "200":
+          description: items
+        "401":
+          description: bad projection secret
+    post:
+      summary: Create user group for a projected account
+      responses:
+        "201":
+          description: created
+  /internal/accounts/{username}/rbac/permissions:
+    get:
+      summary: List permissions for a projected account (ops proxy)
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create permission for a projected account
+      responses:
+        "201":
+          description: created
+  /internal/accounts/{username}/rbac/permission-templates:
+    get:
+      summary: List permission templates for a projected account
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create permission template for a projected account
+      responses:
+        "201":
+          description: created
   /api/versions:
     get:
       summary: List archived versions of an object

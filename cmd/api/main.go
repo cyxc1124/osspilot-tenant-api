@@ -31,21 +31,22 @@ import (
 )
 
 type apiHandlers struct {
-	auth      *auth.Handler
-	bucket    *bucket.Handler
-	objects   *objects.Handler
-	uploads   *uploads.Handler
-	downloads *downloads.Handler
-	platform  *platform.Handler
-	project   *project.Handler
-	versions  *versions.Handler
-	share     *share.Handler
-	edit      *edit.Handler
-	rbac      *rbac.Handler
-	creds     *creds.Handler
-	stats     *stats.Handler
-	audit     *audit.Handler
-	preview   *preview.Handler
+	auth             *auth.Handler
+	bucket           *bucket.Handler
+	objects          *objects.Handler
+	uploads          *uploads.Handler
+	downloads        *downloads.Handler
+	platform         *platform.Handler
+	project          *project.Handler
+	versions         *versions.Handler
+	share            *share.Handler
+	edit             *edit.Handler
+	rbac             *rbac.Handler
+	creds            *creds.Handler
+	stats            *stats.Handler
+	audit            *audit.Handler
+	preview          *preview.Handler
+	projectionSecret string
 }
 
 func newMux(h apiHandlers) http.Handler {
@@ -83,6 +84,7 @@ func newMux(h apiHandlers) http.Handler {
 	}
 	if h.rbac != nil {
 		h.rbac.Register(mux)
+		h.rbac.RegisterInternal(mux, h.projectionSecret)
 	}
 	if h.creds != nil {
 		h.creds.Register(mux)
@@ -198,6 +200,7 @@ func main() {
 	if err := http.ListenAndServe(addr, newMux(apiHandlers{
 		auth: authH, bucket: bucketH, objects: objectH, uploads: uploadH, downloads: downloadH,
 		platform: platformH, project: projectH, versions: versionH, share: shareH, edit: editH, rbac: rbacH, creds: credsH, stats: statsH, audit: auditH, preview: previewH,
+		projectionSecret: cfg.ProjectionSecret,
 	})); err != nil {
 		slog.Error("server", "err", err)
 		os.Exit(1)

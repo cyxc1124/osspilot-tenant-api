@@ -26,6 +26,7 @@ type Handler struct {
 	protect func(auth.UserHandler) http.HandlerFunc
 	ac      *Checker
 	log     auditor
+	secret  string
 }
 
 func NewHandler(users *auth.Store, store *Store, buckets bucketIDs, protect func(auth.UserHandler) http.HandlerFunc, log auditor) *Handler {
