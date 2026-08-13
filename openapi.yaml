@@ -139,3 +139,17 @@ paths:
       responses:
         "200":
           description: items
+  /api/login-branding:
+    get:
+      summary: Public tenant login branding
+      responses:
+        "200":
+          description: logo_text, title, subtitle
+  /api/platform-config:
+    get:
+      summary: Effective storage/CDN config
+      responses:
+        "200":
+          description: region, endpoints, trash policy
+        "401":
+          description: missing or invalid token

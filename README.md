@@ -19,8 +19,11 @@ go run ./cmd/api
 - `GET /api/buckets/{bucket_name}/objects`、`GET .../objects/detail`、`POST .../objects/directories`
 - `POST /api/uploads/presign|complete`、`POST /api/uploads/multipart/{init,parts,complete,abort}`
 - `POST /api/downloads/presign`、`POST /api/downloads/batch`
+- `GET /api/login-branding`（无需登录）、`GET /api/platform-config`
 
 无 `S3_ENDPOINT` / `RGW_ACCESS_KEY` / `RGW_SECRET_KEY` 时上传下载返回 503。
+
+登录品牌与 CDN 域名优先读 `platform_settings`，缺省回退环境变量与内置文案。`storage_region` 暂为 `null`（等运营区域投影）。
 
 租户不内置账号。用户带 `must_change_password=true` 时，除改密、`/api/me`、登出外一律 403。新密码至少 8 位且不能与旧密码相同。
 

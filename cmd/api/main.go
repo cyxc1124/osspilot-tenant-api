@@ -15,11 +15,12 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/downloads"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/uploads"
 )
 
-func newMux(authH *auth.Handler, bucketH *bucket.Handler, objectH *objects.Handler, uploadH *uploads.Handler, downloadH *downloads.Handler) http.Handler {
+func newMux(authH *auth.Handler, bucketH *bucket.Handler, objectH *objects.Handler, uploadH *uploads.Handler, downloadH *downloads.Handler, platformH *platform.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
 	if authH != nil {
@@ -36,6 +37,9 @@ func newMux(authH *auth.Handler, bucketH *bucket.Handler, objectH *objects.Handl
 	}
 	if downloadH != nil {
 		downloadH.Register(mux)
+	}
+	if platformH != nil {
+		platformH.Register(mux)
 	}
 	return httpx.CORS(mux)
 }
@@ -55,6 +59,7 @@ func main() {
 	var bucketStore *bucket.Store
 	var objectStore *objects.Store
 	var uploadStore *uploads.Store
+	var settingsStore *platform.Store
 	if cfg.DatabaseURL != "" {
 		pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
 		if err != nil {
@@ -66,6 +71,7 @@ func main() {
 		bucketStore = bucket.NewStore(pool)
 		objectStore = objects.NewStore(pool)
 		uploadStore = uploads.NewStore(pool)
+		settingsStore = platform.NewStore(pool)
 	} else {
 		slog.Warn("DATABASE_URL unset; auth routes return 503")
 	}
@@ -88,9 +94,16 @@ func main() {
 	objectH := objects.NewHandler(bucketStore, objectStore, s3c, authH.RequireUser)
 	uploadH := uploads.NewHandler(s3c, bucketStore, objectStore, uploadStore, authH.RequireUser)
 	downloadH := downloads.NewHandler(s3c, bucketStore, authH.RequireUser)
+	platformH := platform.NewHandler(settingsStore, authH.RequireUser, platform.Fallbacks{
+		S3Endpoint:        cfg.S3Endpoint,
+		DownloadCDNURL:    cfg.DownloadCDNURL,
+		PreviewCDNURL:     cfg.PreviewCDNURL,
+		ObjectHTTPDomain:  cfg.ObjectHTTPDomain,
+		ObjectHTTPSDomain: cfg.ObjectHTTPSDomain,
+	})
 	addr := cfg.HTTPAddr
 	slog.Info("listen", "addr", addr)
-	if err := http.ListenAndServe(addr, newMux(authH, bucketH, objectH, uploadH, downloadH)); err != nil {
+	if err := http.ListenAndServe(addr, newMux(authH, bucketH, objectH, uploadH, downloadH, platformH)); err != nil {
 		slog.Error("server", "err", err)
 		os.Exit(1)
 	}
