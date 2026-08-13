@@ -52,4 +52,4 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: go build -o /tmp/api ./cmd/api
+      - run: go build ./cmd/...

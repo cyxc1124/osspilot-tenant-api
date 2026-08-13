@@ -1,17 +1,22 @@
 # osspilot-tenant-api
 
-OssPilot 租户 API（Go）。对照 [OssPilot](https://github.com/cyxc1124/OssPilot) `v0.6.0` 按切片重写，不从 Python 拆目录迁过来。
-
-本仓将包含 HTTP API、`migrations/`（goose）、worker。
+OssPilot 租户 API（Go）。对照 [OssPilot](https://github.com/cyxc1124/OssPilot) `v0.6.0` 按切片重写。
 
 ## 本地
 
 ```bash
+# 需要 Postgres 时先迁移
+export DATABASE_URL=postgres://osspilot:osspilot@127.0.0.1:5432/osspilot_tenant?sslmode=disable
+go run ./cmd/migrate up
+
 go test ./...
 go run ./cmd/api
 ```
 
-默认 `:8000`，`GET /healthz`。
+- `GET /healthz`
+- `POST /api/login`、`POST /api/logout`、`GET /api/me`、`POST /api/password/change`
+
+契约见 `openapi.yaml`。无 `DATABASE_URL` 时 healthz 仍可用，鉴权接口返回 503。
 
 ## 许可
 

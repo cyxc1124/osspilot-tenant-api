@@ -8,7 +8,7 @@ import (
 )
 
 func TestHealthz(t *testing.T) {
-	srv := httptest.NewServer(newMux())
+	srv := httptest.NewServer(newMux(nil))
 	t.Cleanup(srv.Close)
 
 	res, err := http.Get(srv.URL + "/healthz")

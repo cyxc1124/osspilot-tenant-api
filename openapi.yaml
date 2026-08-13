@@ -1,0 +1,48 @@
+openapi: 3.1.0
+info:
+  title: OssPilot Tenant API
+  version: 0.1.0
+paths:
+  /healthz:
+    get:
+      summary: Liveness
+      responses:
+        "200":
+          description: ok
+  /api/login:
+    post:
+      summary: Tenant portal login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+                portal: { type: string, enum: [tenant] }
+      responses:
+        "200":
+          description: JWT
+        "401":
+          description: bad credentials
+  /api/logout:
+    post:
+      summary: Stateless logout
+      responses:
+        "200":
+          description: client should discard token
+  /api/me:
+    get:
+      summary: Current user
+      responses:
+        "200":
+          description: profile
+  /api/password/change:
+    post:
+      summary: Change password
+      responses:
+        "204":
+          description: changed
