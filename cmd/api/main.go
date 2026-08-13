@@ -46,6 +46,7 @@ type apiHandlers struct {
 	stats     *stats.Handler
 	audit     *audit.Handler
 	preview   *preview.Handler
+	usage     *stats.InternalHandler
 }
 
 func newMux(h apiHandlers) http.Handler {
@@ -96,6 +97,9 @@ func newMux(h apiHandlers) http.Handler {
 	if h.preview != nil {
 		h.preview.Register(mux)
 	}
+	if h.usage != nil {
+		h.usage.Register(mux)
+	}
 	return httpx.CORS(mux)
 }
 
@@ -123,8 +127,10 @@ func main() {
 	var statsStore *stats.Store
 	var auditStore *audit.Store
 	var auditLog *audit.Logger
+	var pool *pgxpool.Pool
 	if cfg.DatabaseURL != "" {
-		pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+		var err error
+		pool, err = pgxpool.New(context.Background(), cfg.DatabaseURL)
 		if err != nil {
 			slog.Error("db pool", "err", err)
 			os.Exit(1)
@@ -148,10 +154,8 @@ func main() {
 	}
 
 	s3cfg := storage.Config{
-		Endpoint:  cfg.S3Endpoint,
-		AccessKey: cfg.RGWAccessKey,
-		SecretKey: cfg.RGWSecretKey,
-		Region:    cfg.S3Region,
+		Endpoint: cfg.S3Endpoint, AccessKey: cfg.RGWAccessKey, SecretKey: cfg.RGWSecretKey, Region: cfg.S3Region,
+		DownloadCDNURL: cfg.DownloadCDNURL, PreviewCDNURL: cfg.PreviewCDNURL,
 	}
 	var s3c *storage.Client
 	if s3cfg.Ready() {
@@ -189,6 +193,10 @@ func main() {
 	credsH := creds.NewHandler(credsStore, authH.RequireUser, ac, cfg.S3Endpoint, cfg.S3Region, cfg.JWTSecret, bucketStore, objectStore, uploadStore, s3c, auditLog)
 	statsH := stats.NewHandler(statsStore, bucketStore, authH.RequireUser, ac)
 	auditH := audit.NewHandler(auditStore, authH.RequireUser, ac)
+	var usageH *stats.InternalHandler
+	if pool != nil {
+		usageH = stats.NewInternalHandler(stats.NewUsageStore(pool), cfg.ProjectionSecret)
+	}
 	previewH := preview.NewHandler(s3c, bucketStore, authH.RequireUser, ac, auditLog)
 	if cfg.ProjectionSecret == "" {
 		slog.Warn("PROJECTION_SECRET unset; internal projection routes return 503")
@@ -197,7 +205,7 @@ func main() {
 	slog.Info("listen", "addr", addr)
 	if err := http.ListenAndServe(addr, newMux(apiHandlers{
 		auth: authH, bucket: bucketH, objects: objectH, uploads: uploadH, downloads: downloadH,
-		platform: platformH, project: projectH, versions: versionH, share: shareH, edit: editH, rbac: rbacH, creds: credsH, stats: statsH, audit: auditH, preview: previewH,
+		platform: platformH, project: projectH, versions: versionH, share: shareH, edit: editH, rbac: rbacH, creds: credsH, stats: statsH, audit: auditH, preview: previewH, usage: usageH,
 	})); err != nil {
 		slog.Error("server", "err", err)
 		os.Exit(1)

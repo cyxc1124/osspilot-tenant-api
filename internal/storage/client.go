@@ -21,12 +21,14 @@ var (
 )
 
 type Config struct {
-	Endpoint    string
-	AccessKey   string
-	SecretKey   string
-	Region      string
-	UploadTTL   time.Duration
-	DownloadTTL time.Duration
+	Endpoint       string
+	AccessKey      string
+	SecretKey      string
+	Region         string
+	UploadTTL      time.Duration
+	DownloadTTL    time.Duration
+	DownloadCDNURL string
+	PreviewCDNURL  string
 }
 
 func (c Config) Ready() bool {
@@ -34,10 +36,12 @@ func (c Config) Ready() bool {
 }
 
 type Client struct {
-	s3          *s3.Client
-	presign     *s3.PresignClient
-	uploadTTL   time.Duration
-	downloadTTL time.Duration
+	s3             *s3.Client
+	presign        *s3.PresignClient
+	uploadTTL      time.Duration
+	downloadTTL    time.Duration
+	downloadCDNURL string
+	previewCDNURL  string
 }
 
 type ObjectMeta struct {
@@ -71,7 +75,15 @@ func New(cfg Config) *Client {
 	if down <= 0 {
 		down = 10 * time.Minute
 	}
-	return &Client{s3: cli, presign: s3.NewPresignClient(cli), uploadTTL: up, downloadTTL: down}
+	return &Client{
+		s3: cli, presign: s3.NewPresignClient(cli), uploadTTL: up, downloadTTL: down,
+		downloadCDNURL: cfg.DownloadCDNURL, previewCDNURL: cfg.PreviewCDNURL,
+	}
+}
+
+func (c *Client) SetCDN(download, preview string) {
+	c.downloadCDNURL = download
+	c.previewCDNURL = preview
 }
 
 func (c *Client) EnsureBucket(ctx context.Context, name string) error {
@@ -176,7 +188,7 @@ func (c *Client) PresignGetFor(ctx context.Context, bucket, key string, ttl time
 	if err != nil {
 		return "", 0, err
 	}
-	return out.URL, int(ttl.Seconds()), nil
+	return rewriteCDN(out.URL, c.downloadCDNURL), int(ttl.Seconds()), nil
 }
 
 func (c *Client) PresignUploadPart(ctx context.Context, bucket, key, uploadID string, part int32) (string, error) {

@@ -348,6 +348,14 @@ paths:
           description: bad projection secret
         "400":
           description: unsupported key
+  /internal/stats/usage:
+    get:
+      summary: Aggregate object_records usage for ops stats
+      responses:
+        "200":
+          description: totals and per-bucket usage
+        "401":
+          description: bad projection secret
   /internal/accounts/{username}/rbac/user-groups:
     get:
       summary: List user groups for a projected account (ops proxy)
