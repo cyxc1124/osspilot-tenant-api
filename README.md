@@ -16,7 +16,7 @@ go run ./cmd/api
 - `GET /healthz`
 - `POST /api/login`、`POST /api/logout`、`GET /api/me`、`POST /api/password/change`
 
-迁移后内置 `admin` / `admin`，`must_change_password=true`。首次登录后除改密、`/api/me`、登出外一律 403。新密码至少 8 位且不能与旧密码相同。
+租户不内置账号。用户带 `must_change_password=true` 时，除改密、`/api/me`、登出外一律 403。新密码至少 8 位且不能与旧密码相同。
 
 契约见 `openapi.yaml`。无 `DATABASE_URL` 时 healthz 仍可用，鉴权接口返回 503。
 
