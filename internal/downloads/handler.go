@@ -36,7 +36,7 @@ type batchReq struct {
 	Keys       []string `json:"keys"`
 }
 
-func (h *Handler) presign(w http.ResponseWriter, r *http.Request, _ *auth.User) {
+func (h *Handler) presign(w http.ResponseWriter, r *http.Request, user *auth.User) {
 	if h.s3 == nil {
 		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
 		return
@@ -46,7 +46,7 @@ func (h *Handler) presign(w http.ResponseWriter, r *http.Request, _ *auth.User) 
 		httpx.Error(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	url, expires, err := h.one(r, req.BucketName, req.ObjectKey)
+	url, expires, err := h.one(r, user.ID, req.BucketName, req.ObjectKey)
 	if err != nil {
 		h.writeErr(w, err)
 		return
@@ -54,7 +54,7 @@ func (h *Handler) presign(w http.ResponseWriter, r *http.Request, _ *auth.User) 
 	httpx.JSON(w, http.StatusOK, map[string]any{"download_url": url, "expires_in": expires})
 }
 
-func (h *Handler) batch(w http.ResponseWriter, r *http.Request, _ *auth.User) {
+func (h *Handler) batch(w http.ResponseWriter, r *http.Request, user *auth.User) {
 	if h.s3 == nil {
 		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
 		return
@@ -68,7 +68,7 @@ func (h *Handler) batch(w http.ResponseWriter, r *http.Request, _ *auth.User) {
 		httpx.Error(w, http.StatusBadRequest, "keys must contain 1-1000 items")
 		return
 	}
-	b, err := h.buckets.GetByName(r.Context(), req.BucketName)
+	b, err := h.buckets.GetVisible(r.Context(), user.ID, req.BucketName)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
@@ -85,7 +85,7 @@ func (h *Handler) batch(w http.ResponseWriter, r *http.Request, _ *auth.User) {
 			continue
 		}
 		seen[key] = true
-		url, exp, err := h.one(r, req.BucketName, key)
+		url, exp, err := h.one(r, user.ID, req.BucketName, key)
 		if err != nil {
 			items = append(items, map[string]any{"key": key, "download_url": nil, "error": err.Error()})
 			continue
@@ -96,11 +96,11 @@ func (h *Handler) batch(w http.ResponseWriter, r *http.Request, _ *auth.User) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items, "expires_in": expires})
 }
 
-func (h *Handler) one(r *http.Request, bucketName, key string) (string, int, error) {
+func (h *Handler) one(r *http.Request, userID int64, bucketName, key string) (string, int, error) {
 	if !objects.ValidUserKey(key) {
 		return "", 0, badRequest("Invalid object key")
 	}
-	b, err := h.buckets.GetByName(r.Context(), bucketName)
+	b, err := h.buckets.GetVisible(r.Context(), userID, bucketName)
 	if err != nil {
 		return "", 0, err
 	}

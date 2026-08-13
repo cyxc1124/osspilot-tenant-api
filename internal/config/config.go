@@ -20,6 +20,7 @@ type Config struct {
 	PreviewCDNURL     string
 	ObjectHTTPDomain  string
 	ObjectHTTPSDomain string
+	ProjectionSecret  string
 }
 
 func Load() Config {
@@ -39,6 +40,7 @@ func Load() Config {
 		PreviewCDNURL:     os.Getenv("PREVIEW_CDN_URL"),
 		ObjectHTTPDomain:  os.Getenv("OBJECT_HTTP_DOMAIN"),
 		ObjectHTTPSDomain: os.Getenv("OBJECT_HTTPS_DOMAIN"),
+		ProjectionSecret:  os.Getenv("PROJECTION_SECRET"),
 	}
 }
 

@@ -80,8 +80,8 @@ type detail struct {
 	UpdatedAt             string  `json:"updated_at"`
 }
 
-func (h *Handler) list(w http.ResponseWriter, r *http.Request, _ *auth.User) {
-	items, err := h.store.List(r.Context())
+func (h *Handler) list(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	items, err := h.store.List(r.Context(), user.ID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
@@ -103,7 +103,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.validateLogging(w, r, req.AccessLoggingEnabled, req.AccessLogTargetBucket, req.BucketName); err != nil {
+	if err := h.validateLogging(w, r, user, req.AccessLoggingEnabled, req.AccessLogTargetBucket, req.BucketName); err != nil {
 		return
 	}
 	now := time.Now()
@@ -130,6 +130,11 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
+	if err := h.store.GrantLocal(r.Context(), user.ID, b.ID); err != nil {
+		_ = h.store.Delete(r.Context(), b.ID)
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
+	}
 	if h.s3 != nil {
 		if err := h.s3.EnsureBucket(r.Context(), b.BucketName); err != nil {
 			_ = h.store.Delete(r.Context(), b.ID)
@@ -140,16 +145,16 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 	httpx.JSON(w, http.StatusCreated, toDetail(*b))
 }
 
-func (h *Handler) get(w http.ResponseWriter, r *http.Request, _ *auth.User) {
-	b, ok := h.load(w, r)
+func (h *Handler) get(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	b, ok := h.load(w, r, user)
 	if !ok {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, toDetail(*b))
 }
 
-func (h *Handler) update(w http.ResponseWriter, r *http.Request, _ *auth.User) {
-	b, ok := h.load(w, r)
+func (h *Handler) update(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	b, ok := h.load(w, r, user)
 	if !ok {
 		return
 	}
@@ -185,7 +190,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, _ *auth.User) {
 	if req.AccessLogPrefix != nil {
 		b.AccessLogPrefix = emptyToNil(req.AccessLogPrefix)
 	}
-	if err := h.validateLogging(w, r, b.AccessLoggingEnabled, b.AccessLogTargetBucket, b.BucketName); err != nil {
+	if err := h.validateLogging(w, r, user, b.AccessLoggingEnabled, b.AccessLogTargetBucket, b.BucketName); err != nil {
 		return
 	}
 	b.UpdatedAt = time.Now()
@@ -196,8 +201,8 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, _ *auth.User) {
 	httpx.JSON(w, http.StatusOK, toDetail(*b))
 }
 
-func (h *Handler) remove(w http.ResponseWriter, r *http.Request, _ *auth.User) {
-	b, ok := h.load(w, r)
+func (h *Handler) remove(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	b, ok := h.load(w, r, user)
 	if !ok {
 		return
 	}
@@ -220,9 +225,9 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request, _ *auth.User) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) load(w http.ResponseWriter, r *http.Request) (*Bucket, bool) {
+func (h *Handler) load(w http.ResponseWriter, r *http.Request, user *auth.User) (*Bucket, bool) {
 	name := r.PathValue("bucket_name")
-	b, err := h.store.GetByName(r.Context(), name)
+	b, err := h.store.GetVisible(r.Context(), user.ID, name)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return nil, false
@@ -234,7 +239,7 @@ func (h *Handler) load(w http.ResponseWriter, r *http.Request) (*Bucket, bool) {
 	return b, true
 }
 
-func (h *Handler) validateLogging(w http.ResponseWriter, r *http.Request, enabled bool, target *string, source string) error {
+func (h *Handler) validateLogging(w http.ResponseWriter, r *http.Request, user *auth.User, enabled bool, target *string, source string) error {
 	if !enabled {
 		return nil
 	}
@@ -246,7 +251,7 @@ func (h *Handler) validateLogging(w http.ResponseWriter, r *http.Request, enable
 		httpx.Error(w, http.StatusBadRequest, "Access log target bucket must differ from the source bucket")
 		return errLogging
 	}
-	other, err := h.store.GetByName(r.Context(), *target)
+	other, err := h.store.GetVisible(r.Context(), user.ID, *target)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return errLogging

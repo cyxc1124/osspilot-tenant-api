@@ -51,6 +51,46 @@ func (s *Store) UpdatePassword(ctx context.Context, id int64, hash string, at ti
 	return err
 }
 
+func (s *Store) Upsert(ctx context.Context, u Upsert) (int64, error) {
+	var id int64
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO tenant_users (
+			username, password_hash, display_name, email, phone, status, role, must_change_password, created_at, updated_at
+		) VALUES ($1,$2,$3,$4,$5,$6,'tenant_admin',COALESCE($7,true),now(),now())
+		ON CONFLICT (username) DO UPDATE SET
+			password_hash = CASE WHEN EXCLUDED.password_hash <> '' THEN EXCLUDED.password_hash ELSE tenant_users.password_hash END,
+			display_name = EXCLUDED.display_name,
+			email = EXCLUDED.email,
+			phone = EXCLUDED.phone,
+			status = EXCLUDED.status,
+			role = 'tenant_admin',
+			must_change_password = COALESCE($7, tenant_users.must_change_password),
+			updated_at = now()
+		RETURNING id`, u.Username, u.PasswordHash, u.DisplayName, u.Email, u.Phone, u.Status, u.MustChangePassword).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("upsert user: %w", err)
+	}
+	return id, nil
+}
+
+func (s *Store) DeleteByUsername(ctx context.Context, username string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM tenant_users WHERE username = $1`, username)
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	return nil
+}
+
+type Upsert struct {
+	Username           string
+	PasswordHash       string
+	DisplayName        *string
+	Email              *string
+	Phone              *string
+	Status             string
+	MustChangePassword *bool
+}
+
 func (s *Store) scanUser(ctx context.Context, q string, arg any) (*User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx, q, arg).Scan(

@@ -153,3 +153,24 @@ paths:
           description: region, endpoints, trash policy
         "401":
           description: missing or invalid token
+  /internal/accounts/{username}:
+    put:
+      summary: Upsert a tenant account projected from ops
+      responses:
+        "204":
+          description: upserted
+        "401":
+          description: bad projection secret
+    delete:
+      summary: Delete a projected tenant account
+      responses:
+        "204":
+          description: deleted
+  /internal/accounts/{username}/buckets:
+    put:
+      summary: Replace ops-sourced bucket grants
+      responses:
+        "204":
+          description: replaced
+        "404":
+          description: account missing

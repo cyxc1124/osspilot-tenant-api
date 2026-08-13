@@ -56,8 +56,8 @@ type detail struct {
 	UserMetadata         map[string]string `json:"user_metadata"`
 }
 
-func (h *Handler) list(w http.ResponseWriter, r *http.Request, _ *auth.User) {
-	b, ok := h.bucket(w, r)
+func (h *Handler) list(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	b, ok := h.bucket(w, r, user)
 	if !ok {
 		return
 	}
@@ -100,13 +100,13 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request, _ *auth.User) {
 	})
 }
 
-func (h *Handler) detail(w http.ResponseWriter, r *http.Request, _ *auth.User) {
+func (h *Handler) detail(w http.ResponseWriter, r *http.Request, user *auth.User) {
 	key := strings.TrimSpace(r.URL.Query().Get("key"))
 	if key == "" || strings.HasPrefix(key, trashPrefix) {
 		httpx.Error(w, http.StatusBadRequest, "Invalid object key")
 		return
 	}
-	b, ok := h.bucket(w, r)
+	b, ok := h.bucket(w, r, user)
 	if !ok {
 		return
 	}
@@ -156,7 +156,7 @@ func (h *Handler) mkdir(w http.ResponseWriter, r *http.Request, user *auth.User)
 		httpx.Error(w, http.StatusBadRequest, "Invalid directory key")
 		return
 	}
-	b, ok := h.bucket(w, r)
+	b, ok := h.bucket(w, r, user)
 	if !ok {
 		return
 	}
@@ -180,8 +180,8 @@ func (h *Handler) mkdir(w http.ResponseWriter, r *http.Request, user *auth.User)
 	httpx.JSON(w, http.StatusOK, map[string]any{"key": key, "size": 0, "last_modified": ts})
 }
 
-func (h *Handler) bucket(w http.ResponseWriter, r *http.Request) (*bucket.Bucket, bool) {
-	b, err := h.buckets.GetByName(r.Context(), r.PathValue("bucket_name"))
+func (h *Handler) bucket(w http.ResponseWriter, r *http.Request, user *auth.User) (*bucket.Bucket, bool) {
+	b, err := h.buckets.GetVisible(r.Context(), user.ID, r.PathValue("bucket_name"))
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return nil, false

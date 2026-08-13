@@ -42,8 +42,13 @@ const bucketCols = `id, bucket_name, display_name, display_alias_only, quota_byt
 	versioning_enabled, access_logging_enabled, access_log_target_bucket, access_log_prefix,
 	status, created_by, created_at, updated_at`
 
-func (s *Store) List(ctx context.Context) ([]Bucket, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+bucketCols+` FROM buckets WHERE status = 'active' ORDER BY created_at DESC`)
+func (s *Store) List(ctx context.Context, userID int64) ([]Bucket, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+bucketCols+`
+		FROM buckets b
+		JOIN account_bucket_grants g ON g.bucket_id = b.id
+		WHERE g.user_id = $1 AND b.status = 'active'
+		ORDER BY b.created_at DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list buckets: %w", err)
 	}
@@ -59,8 +64,12 @@ func (s *Store) List(ctx context.Context) ([]Bucket, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) GetByName(ctx context.Context, name string) (*Bucket, error) {
-	b, err := scanBucket(s.pool.QueryRow(ctx, `SELECT `+bucketCols+` FROM buckets WHERE bucket_name = $1`, name))
+func (s *Store) GetVisible(ctx context.Context, userID int64, name string) (*Bucket, error) {
+	b, err := scanBucket(s.pool.QueryRow(ctx, `
+		SELECT `+bucketCols+`
+		FROM buckets b
+		JOIN account_bucket_grants g ON g.bucket_id = b.id
+		WHERE g.user_id = $1 AND b.bucket_name = $2 AND b.status = 'active'`, userID, name))
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -68,6 +77,50 @@ func (s *Store) GetByName(ctx context.Context, name string) (*Bucket, error) {
 		return nil, fmt.Errorf("get bucket: %w", err)
 	}
 	return &b, nil
+}
+
+func (s *Store) GrantLocal(ctx context.Context, userID, bucketID int64) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO account_bucket_grants (user_id, bucket_id, local) VALUES ($1,$2,true)
+		ON CONFLICT (user_id, bucket_id) DO NOTHING`, userID, bucketID)
+	if err != nil {
+		return fmt.Errorf("grant bucket: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) Ensure(ctx context.Context, name string, display *string) (int64, error) {
+	var id int64
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO buckets (bucket_name, display_name, status, created_at, updated_at)
+		VALUES ($1,$2,'active',now(),now())
+		ON CONFLICT (bucket_name) DO UPDATE SET
+			display_name = COALESCE(EXCLUDED.display_name, buckets.display_name),
+			updated_at = now()
+		RETURNING id`, name, display).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("ensure bucket: %w", err)
+	}
+	return id, nil
+}
+
+func (s *Store) ReplaceOpsGrants(ctx context.Context, userID int64, bucketIDs []int64) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `DELETE FROM account_bucket_grants WHERE user_id = $1 AND NOT local`, userID); err != nil {
+		return fmt.Errorf("clear ops grants: %w", err)
+	}
+	for _, id := range bucketIDs {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO account_bucket_grants (user_id, bucket_id, local) VALUES ($1,$2,false)
+			ON CONFLICT (user_id, bucket_id) DO NOTHING`, userID, id); err != nil {
+			return fmt.Errorf("insert ops grant: %w", err)
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Store) Insert(ctx context.Context, b *Bucket) error {

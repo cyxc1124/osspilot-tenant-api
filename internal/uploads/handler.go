@@ -88,7 +88,7 @@ func (h *Handler) presign(w http.ResponseWriter, r *http.Request, user *auth.Use
 		httpx.Error(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	b, ct, ok := h.prepare(w, r, req.BucketName, req.ObjectKey, req.Size, req.ContentType)
+	b, ct, ok := h.prepare(w, r, user.ID, req.BucketName, req.ObjectKey, req.Size, req.ContentType)
 	if !ok {
 		return
 	}
@@ -132,7 +132,7 @@ func (h *Handler) mpInit(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	b, ct, ok := h.prepare(w, r, req.BucketName, req.ObjectKey, req.Size, req.ContentType)
+	b, ct, ok := h.prepare(w, r, user.ID, req.BucketName, req.ObjectKey, req.Size, req.ContentType)
 	if !ok {
 		return
 	}
@@ -158,7 +158,7 @@ func (h *Handler) mpParts(w http.ResponseWriter, r *http.Request, user *auth.Use
 		httpx.Error(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	if _, ok := h.bucketOK(w, r, req.BucketName); !ok {
+	if _, ok := h.bucketOK(w, r, user.ID, req.BucketName); !ok {
 		return
 	}
 	task, ok := h.pending(w, r, user.ID, req.TaskID, req.BucketName, req.ObjectKey, TypeMultipart)
@@ -230,7 +230,7 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request, user *auth.Us
 		httpx.Error(w, http.StatusBadRequest, "Invalid object key")
 		return
 	}
-	b, err := h.buckets.GetByName(r.Context(), bucketName)
+	b, err := h.buckets.GetVisible(r.Context(), user.ID, bucketName)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
@@ -274,7 +274,7 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request, user *auth.Us
 	})
 }
 
-func (h *Handler) prepare(w http.ResponseWriter, r *http.Request, bucketName, key string, size int64, contentType *string) (*bucket.Bucket, string, bool) {
+func (h *Handler) prepare(w http.ResponseWriter, r *http.Request, userID int64, bucketName, key string, size int64, contentType *string) (*bucket.Bucket, string, bool) {
 	if !objects.ValidUserKey(key) {
 		httpx.Error(w, http.StatusBadRequest, "Invalid object key")
 		return nil, "", false
@@ -283,7 +283,7 @@ func (h *Handler) prepare(w http.ResponseWriter, r *http.Request, bucketName, ke
 		httpx.Error(w, http.StatusBadRequest, "size must be greater than 0")
 		return nil, "", false
 	}
-	b, err := h.buckets.GetByName(r.Context(), bucketName)
+	b, err := h.buckets.GetVisible(r.Context(), userID, bucketName)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return nil, "", false
@@ -299,8 +299,8 @@ func (h *Handler) prepare(w http.ResponseWriter, r *http.Request, bucketName, ke
 	return b, ct, true
 }
 
-func (h *Handler) bucketOK(w http.ResponseWriter, r *http.Request, name string) (*bucket.Bucket, bool) {
-	b, err := h.buckets.GetByName(r.Context(), name)
+func (h *Handler) bucketOK(w http.ResponseWriter, r *http.Request, userID int64, name string) (*bucket.Bucket, bool) {
+	b, err := h.buckets.GetVisible(r.Context(), userID, name)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return nil, false
