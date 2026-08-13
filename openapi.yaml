@@ -46,3 +46,30 @@ paths:
       responses:
         "204":
           description: changed
+  /api/buckets:
+    get:
+      summary: List buckets
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create bucket metadata
+      responses:
+        "201":
+          description: created
+  /api/buckets/{bucket_name}:
+    get:
+      summary: Get bucket
+      responses:
+        "200":
+          description: detail
+    put:
+      summary: Update bucket metadata
+      responses:
+        "200":
+          description: detail
+    delete:
+      summary: Delete bucket metadata
+      responses:
+        "204":
+          description: deleted

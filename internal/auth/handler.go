@@ -20,9 +20,9 @@ func NewHandler(store *Store, secret string, ttl time.Duration) *Handler {
 
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/login", h.login)
-	mux.HandleFunc("POST /api/logout", h.requireUser(h.logout))
-	mux.HandleFunc("GET /api/me", h.requireUser(h.me))
-	mux.HandleFunc("POST /api/password/change", h.requireUser(h.changePassword))
+	mux.HandleFunc("POST /api/logout", h.RequireUser(h.logout))
+	mux.HandleFunc("GET /api/me", h.RequireUser(h.me))
+	mux.HandleFunc("POST /api/password/change", h.RequireUser(h.changePassword))
 }
 
 type loginRequest struct {
@@ -155,9 +155,9 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request, user *U
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type userHandler func(http.ResponseWriter, *http.Request, *User)
+type UserHandler func(http.ResponseWriter, *http.Request, *User)
 
-func (h *Handler) requireUser(next userHandler) http.HandlerFunc {
+func (h *Handler) RequireUser(next UserHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if h.store == nil {
 			httpx.Error(w, http.StatusServiceUnavailable, "database is not configured")
