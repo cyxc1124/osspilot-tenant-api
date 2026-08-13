@@ -31,6 +31,7 @@ go run ./cmd/worker
 - `GET|DELETE /api/buckets/{bucket_name}/trash`、`POST .../trash/restore`（列表/清空/恢复；列表读 `object_records`，恢复与清空走 RGW）
 - `POST /api/uploads/presign|complete`、`POST /api/uploads/multipart/{init,parts,complete,abort}`
 - `POST /api/downloads/presign`、`POST /api/downloads/batch`
+- `GET /api/preview/{text,image,video,audio,pdf}`（文本限 512KiB；媒体走预签名 GET，暂不改写 CDN）
 - `GET /api/versions`、`GET /api/versions/{id}`、`POST .../download`、`POST .../restore`、`DELETE /api/versions/{id}`
 - `GET|POST /api/share-links`、`DELETE /api/share-links/{id}`、公开 `GET /s/{token}`（可选 `?password=`，返回预签名 URL）
 - `GET /api/file-locks/status`、`POST /api/file-locks/{lock,refresh,unlock}`

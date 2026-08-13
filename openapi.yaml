@@ -203,6 +203,38 @@ paths:
       responses:
         "200":
           description: items
+  /api/preview/text:
+    get:
+      summary: Fetch small text object for preview
+      responses:
+        "200":
+          description: content and language
+        "413":
+          description: too large
+  /api/preview/image:
+    get:
+      summary: Presign image preview URL
+      responses:
+        "200":
+          description: preview_url
+  /api/preview/video:
+    get:
+      summary: Presign video preview URL
+      responses:
+        "200":
+          description: preview_url
+  /api/preview/audio:
+    get:
+      summary: Presign audio preview URL
+      responses:
+        "200":
+          description: preview_url
+  /api/preview/pdf:
+    get:
+      summary: Presign PDF preview URL
+      responses:
+        "200":
+          description: preview_url
   /api/login-branding:
     get:
       summary: Public tenant login branding

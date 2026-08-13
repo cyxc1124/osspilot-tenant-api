@@ -19,6 +19,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/preview"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/project"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/share"
@@ -43,6 +44,7 @@ type apiHandlers struct {
 	creds     *creds.Handler
 	stats     *stats.Handler
 	audit     *audit.Handler
+	preview   *preview.Handler
 }
 
 func newMux(h apiHandlers) http.Handler {
@@ -89,6 +91,9 @@ func newMux(h apiHandlers) http.Handler {
 	}
 	if h.audit != nil {
 		h.audit.Register(mux)
+	}
+	if h.preview != nil {
+		h.preview.Register(mux)
 	}
 	return httpx.CORS(mux)
 }
@@ -177,6 +182,7 @@ func main() {
 	credsH := creds.NewHandler(credsStore, authH.RequireUser, ac, cfg.S3Endpoint, cfg.S3Region, cfg.JWTSecret, bucketStore, objectStore, uploadStore, s3c, auditLog)
 	statsH := stats.NewHandler(statsStore, bucketStore, authH.RequireUser, ac)
 	auditH := audit.NewHandler(auditStore, authH.RequireUser, ac)
+	previewH := preview.NewHandler(s3c, bucketStore, authH.RequireUser, ac, auditLog)
 	if cfg.ProjectionSecret == "" {
 		slog.Warn("PROJECTION_SECRET unset; internal projection routes return 503")
 	}
@@ -184,7 +190,7 @@ func main() {
 	slog.Info("listen", "addr", addr)
 	if err := http.ListenAndServe(addr, newMux(apiHandlers{
 		auth: authH, bucket: bucketH, objects: objectH, uploads: uploadH, downloads: downloadH,
-		platform: platformH, project: projectH, versions: versionH, share: shareH, edit: editH, rbac: rbacH, creds: credsH, stats: statsH, audit: auditH,
+		platform: platformH, project: projectH, versions: versionH, share: shareH, edit: editH, rbac: rbacH, creds: credsH, stats: statsH, audit: auditH, preview: previewH,
 	})); err != nil {
 		slog.Error("server", "err", err)
 		os.Exit(1)
