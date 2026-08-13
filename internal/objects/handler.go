@@ -1,28 +1,34 @@
 package objects
 
 import (
+	"bytes"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
 type Handler struct {
 	buckets *bucket.Store
 	store   *Store
+	s3      *storage.Client
 	protect func(auth.UserHandler) http.HandlerFunc
 }
 
-func NewHandler(buckets *bucket.Store, store *Store, protect func(auth.UserHandler) http.HandlerFunc) *Handler {
-	return &Handler{buckets: buckets, store: store, protect: protect}
+func NewHandler(buckets *bucket.Store, store *Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc) *Handler {
+	return &Handler{buckets: buckets, store: store, s3: s3, protect: protect}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/buckets/{bucket_name}/objects", h.protect(h.list))
 	mux.HandleFunc("GET /api/buckets/{bucket_name}/objects/detail", h.protect(h.detail))
+	mux.HandleFunc("POST /api/buckets/{bucket_name}/objects/directories", h.protect(h.mkdir))
 }
 
 type summary struct {
@@ -119,6 +125,59 @@ func (h *Handler) detail(w http.ResponseWriter, r *http.Request, _ *auth.User) {
 		UploadedByUsername: rec.Username, CreatedAt: rec.CreatedAt, UpdatedAt: rec.UpdatedAt,
 		AccessPermission: "private", UserMetadata: map[string]string{},
 	})
+}
+
+type mkdirReq struct {
+	Name         string `json:"name"`
+	ParentPrefix string `json:"parent_prefix"`
+}
+
+func (h *Handler) mkdir(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	if h.s3 == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
+		return
+	}
+	var req mkdirReq
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	name := strings.TrimSpace(strings.Trim(req.Name, "/"))
+	if name == "" || strings.Contains(name, "/") {
+		httpx.Error(w, http.StatusBadRequest, "Directory name must not contain /")
+		return
+	}
+	parent := strings.TrimSpace(req.ParentPrefix)
+	if parent != "" && !strings.HasSuffix(parent, "/") {
+		parent += "/"
+	}
+	key := parent + name + "/"
+	if !ValidUserKey(key) {
+		httpx.Error(w, http.StatusBadRequest, "Invalid directory key")
+		return
+	}
+	b, ok := h.bucket(w, r)
+	if !ok {
+		return
+	}
+	if _, err := h.s3.HeadObject(r.Context(), b.BucketName, key); err == nil {
+		httpx.Error(w, http.StatusConflict, "Directory already exists")
+		return
+	} else if err != nil && !errors.Is(err, storage.ErrNotFound) {
+		httpx.Error(w, http.StatusBadGateway, "storage error")
+		return
+	}
+	if err := h.s3.PutObject(r.Context(), b.BucketName, key, bytes.NewReader(nil), ""); err != nil {
+		httpx.Error(w, http.StatusBadGateway, "storage error")
+		return
+	}
+	now := time.Now()
+	if err := h.store.Upsert(r.Context(), b.ID, b.BucketName, key, 0, nil, nil, user.ID, now); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	ts := now.UTC().Format(time.RFC3339)
+	httpx.JSON(w, http.StatusOK, map[string]any{"key": key, "size": 0, "last_modified": ts})
 }
 
 func (h *Handler) bucket(w http.ResponseWriter, r *http.Request) (*bucket.Bucket, bool) {

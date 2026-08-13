@@ -7,15 +7,17 @@ import (
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
 type Handler struct {
 	store   *Store
+	s3      *storage.Client
 	protect func(auth.UserHandler) http.HandlerFunc
 }
 
-func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc) *Handler {
-	return &Handler{store: store, protect: protect}
+func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, s3 *storage.Client) *Handler {
+	return &Handler{store: store, protect: protect, s3: s3}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -106,7 +108,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 	}
 	now := time.Now()
 	uid := user.ID
-	// ponytail: persist metadata only; RGW create/versioning/logging is T4.
+	// ponytail: RGW create happens below when S3 is configured.
 	b := &Bucket{
 		BucketName:            req.BucketName,
 		DisplayName:           emptyToNil(req.DisplayName),
@@ -127,6 +129,13 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 		}
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
+	}
+	if h.s3 != nil {
+		if err := h.s3.EnsureBucket(r.Context(), b.BucketName); err != nil {
+			_ = h.store.Delete(r.Context(), b.ID)
+			httpx.Error(w, http.StatusBadGateway, "storage error")
+			return
+		}
 	}
 	httpx.JSON(w, http.StatusCreated, toDetail(*b))
 }
@@ -191,6 +200,18 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request, _ *auth.User) {
 	b, ok := h.load(w, r)
 	if !ok {
 		return
+	}
+	if h.s3 != nil {
+		if err := h.s3.DeleteBucket(r.Context(), b.BucketName); err != nil {
+			if errors.Is(err, storage.ErrNotEmpty) {
+				httpx.Error(w, http.StatusConflict, "bucket.not_empty")
+				return
+			}
+			if !errors.Is(err, storage.ErrNotFound) {
+				httpx.Error(w, http.StatusBadGateway, "storage error")
+				return
+			}
+		}
 	}
 	if err := h.store.Delete(r.Context(), b.ID); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")

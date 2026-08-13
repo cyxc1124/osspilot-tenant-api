@@ -12,6 +12,10 @@ type Config struct {
 	JWTSecret      string
 	TokenTTL       time.Duration
 	DefaultJWTUsed bool
+	S3Endpoint     string
+	RGWAccessKey   string
+	RGWSecretKey   string
+	S3Region       string
 }
 
 func Load() Config {
@@ -23,6 +27,10 @@ func Load() Config {
 		JWTSecret:      secret,
 		TokenTTL:       time.Duration(minutes) * time.Minute,
 		DefaultJWTUsed: os.Getenv("JWT_SECRET") == "",
+		S3Endpoint:     os.Getenv("S3_ENDPOINT"),
+		RGWAccessKey:   os.Getenv("RGW_ACCESS_KEY"),
+		RGWSecretKey:   os.Getenv("RGW_SECRET_KEY"),
+		S3Region:       getenv("S3_REGION", "us-east-1"),
 	}
 }
 

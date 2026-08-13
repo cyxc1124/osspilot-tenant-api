@@ -12,11 +12,14 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/config"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/downloads"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/uploads"
 )
 
-func newMux(authH *auth.Handler, bucketH *bucket.Handler, objectH *objects.Handler) http.Handler {
+func newMux(authH *auth.Handler, bucketH *bucket.Handler, objectH *objects.Handler, uploadH *uploads.Handler, downloadH *downloads.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
 	if authH != nil {
@@ -27,6 +30,12 @@ func newMux(authH *auth.Handler, bucketH *bucket.Handler, objectH *objects.Handl
 	}
 	if objectH != nil {
 		objectH.Register(mux)
+	}
+	if uploadH != nil {
+		uploadH.Register(mux)
+	}
+	if downloadH != nil {
+		downloadH.Register(mux)
 	}
 	return httpx.CORS(mux)
 }
@@ -45,6 +54,7 @@ func main() {
 	var authStore *auth.Store
 	var bucketStore *bucket.Store
 	var objectStore *objects.Store
+	var uploadStore *uploads.Store
 	if cfg.DatabaseURL != "" {
 		pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
 		if err != nil {
@@ -55,16 +65,32 @@ func main() {
 		authStore = auth.NewStore(pool)
 		bucketStore = bucket.NewStore(pool)
 		objectStore = objects.NewStore(pool)
+		uploadStore = uploads.NewStore(pool)
 	} else {
 		slog.Warn("DATABASE_URL unset; auth routes return 503")
 	}
 
+	s3cfg := storage.Config{
+		Endpoint:  cfg.S3Endpoint,
+		AccessKey: cfg.RGWAccessKey,
+		SecretKey: cfg.RGWSecretKey,
+		Region:    cfg.S3Region,
+	}
+	var s3c *storage.Client
+	if s3cfg.Ready() {
+		s3c = storage.New(s3cfg)
+	} else {
+		slog.Warn("S3_ENDPOINT/RGW_ACCESS_KEY/RGW_SECRET_KEY unset; upload/download return 503")
+	}
+
 	authH := auth.NewHandler(authStore, cfg.JWTSecret, cfg.TokenTTL)
-	bucketH := bucket.NewHandler(bucketStore, authH.RequireUser)
-	objectH := objects.NewHandler(bucketStore, objectStore, authH.RequireUser)
+	bucketH := bucket.NewHandler(bucketStore, authH.RequireUser, s3c)
+	objectH := objects.NewHandler(bucketStore, objectStore, s3c, authH.RequireUser)
+	uploadH := uploads.NewHandler(s3c, bucketStore, objectStore, uploadStore, authH.RequireUser)
+	downloadH := downloads.NewHandler(s3c, bucketStore, authH.RequireUser)
 	addr := cfg.HTTPAddr
 	slog.Info("listen", "addr", addr)
-	if err := http.ListenAndServe(addr, newMux(authH, bucketH, objectH)); err != nil {
+	if err := http.ListenAndServe(addr, newMux(authH, bucketH, objectH, uploadH, downloadH)); err != nil {
 		slog.Error("server", "err", err)
 		os.Exit(1)
 	}

@@ -85,3 +85,57 @@ paths:
       responses:
         "200":
           description: detail
+  /api/buckets/{bucket_name}/objects/directories:
+    post:
+      summary: Create directory placeholder
+      responses:
+        "200":
+          description: created
+  /api/uploads/presign:
+    post:
+      summary: Presign PUT upload
+      responses:
+        "200":
+          description: url and headers
+  /api/uploads/complete:
+    post:
+      summary: Finalize simple upload
+      responses:
+        "200":
+          description: object metadata
+  /api/uploads/multipart/init:
+    post:
+      summary: Start multipart upload
+      responses:
+        "200":
+          description: upload_id
+  /api/uploads/multipart/parts:
+    post:
+      summary: Presign multipart parts
+      responses:
+        "200":
+          description: part urls
+  /api/uploads/multipart/complete:
+    post:
+      summary: Complete multipart upload
+      responses:
+        "200":
+          description: object metadata
+  /api/uploads/multipart/abort:
+    post:
+      summary: Abort multipart upload
+      responses:
+        "200":
+          description: aborted
+  /api/downloads/presign:
+    post:
+      summary: Presign GET download
+      responses:
+        "200":
+          description: url
+  /api/downloads/batch:
+    post:
+      summary: Batch presign GET
+      responses:
+        "200":
+          description: items

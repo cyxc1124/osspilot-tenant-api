@@ -70,3 +70,23 @@ func (s *Store) Get(ctx context.Context, bucketID int64, key string) (*record, e
 	rec.LastModified, rec.CreatedAt, rec.UpdatedAt = &ls, &cs, &us
 	return &rec, nil
 }
+
+func (s *Store) Upsert(ctx context.Context, bucketID int64, bucketName, key string, size int64, etag, contentType *string, userID int64, at time.Time) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO object_records (
+			bucket_id, bucket_name, object_key, size, etag, content_type,
+			created_by, updated_by, last_seen_at, created_at, updated_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$8,$8)
+		ON CONFLICT (bucket_id, object_key) DO UPDATE SET
+			size = EXCLUDED.size,
+			etag = EXCLUDED.etag,
+			content_type = EXCLUDED.content_type,
+			updated_by = EXCLUDED.updated_by,
+			last_seen_at = EXCLUDED.last_seen_at,
+			updated_at = EXCLUDED.updated_at`,
+		bucketID, bucketName, key, size, etag, contentType, userID, at)
+	if err != nil {
+		return fmt.Errorf("upsert object: %w", err)
+	}
+	return nil
+}
