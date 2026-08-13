@@ -25,7 +25,7 @@ paths:
                 portal: { type: string, enum: [tenant] }
       responses:
         "200":
-          description: JWT
+          description: JWT; includes must_change_password
         "401":
           description: bad credentials
   /api/logout:
@@ -39,7 +39,7 @@ paths:
       summary: Current user
       responses:
         "200":
-          description: profile
+          description: profile including must_change_password
   /api/password/change:
     post:
       summary: Change password

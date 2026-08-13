@@ -32,18 +32,20 @@ type loginRequest struct {
 }
 
 type loginResponse struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresIn   int    `json:"expires_in"`
+	AccessToken        string `json:"access_token"`
+	TokenType          string `json:"token_type"`
+	ExpiresIn          int    `json:"expires_in"`
+	MustChangePassword bool   `json:"must_change_password"`
 }
 
 type meResponse struct {
-	ID          int64   `json:"id"`
-	Username    string  `json:"username"`
-	DisplayName *string `json:"display_name"`
-	Email       *string `json:"email"`
-	Phone       *string `json:"phone"`
-	Role        *string `json:"role"`
+	ID                 int64   `json:"id"`
+	Username           string  `json:"username"`
+	DisplayName        *string `json:"display_name"`
+	Email              *string `json:"email"`
+	Phone              *string `json:"phone"`
+	Role               *string `json:"role"`
+	MustChangePassword bool    `json:"must_change_password"`
 }
 
 type passwordChangeRequest struct {
@@ -95,9 +97,10 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = h.store.TouchLogin(r.Context(), user.ID, time.Now())
 	httpx.JSON(w, http.StatusOK, loginResponse{
-		AccessToken: token,
-		TokenType:   "bearer",
-		ExpiresIn:   int(h.ttl.Seconds()),
+		AccessToken:        token,
+		TokenType:          "bearer",
+		ExpiresIn:          int(h.ttl.Seconds()),
+		MustChangePassword: user.MustChangePassword,
 	})
 }
 
@@ -108,12 +111,13 @@ func (h *Handler) logout(w http.ResponseWriter, _ *http.Request, _ *User) {
 func (h *Handler) me(w http.ResponseWriter, _ *http.Request, user *User) {
 	role := user.Role
 	httpx.JSON(w, http.StatusOK, meResponse{
-		ID:          user.ID,
-		Username:    user.Username,
-		DisplayName: user.DisplayName,
-		Email:       user.Email,
-		Phone:       user.Phone,
-		Role:        &role,
+		ID:                 user.ID,
+		Username:           user.Username,
+		DisplayName:        user.DisplayName,
+		Email:              user.Email,
+		Phone:              user.Phone,
+		Role:               &role,
+		MustChangePassword: user.MustChangePassword,
 	})
 }
 
@@ -129,6 +133,10 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request, user *U
 	}
 	if len(req.NewPassword) < 8 || len(req.NewPassword) > 128 {
 		httpx.Error(w, http.StatusBadRequest, "new_password must be 8-128 characters")
+		return
+	}
+	if req.OldPassword == req.NewPassword {
+		httpx.Error(w, http.StatusBadRequest, "new_password must differ from old_password")
 		return
 	}
 	if !CheckPassword(req.OldPassword, user.PasswordHash) {
@@ -172,6 +180,10 @@ func (h *Handler) requireUser(next userHandler) http.HandlerFunc {
 		}
 		if user == nil || user.Status != "active" {
 			httpx.Error(w, http.StatusUnauthorized, "invalid token")
+			return
+		}
+		if user.MustChangePassword && r.URL.Path != "/api/password/change" && r.URL.Path != "/api/me" && r.URL.Path != "/api/logout" {
+			httpx.Error(w, http.StatusForbidden, "password change required")
 			return
 		}
 		next(w, r, user)
