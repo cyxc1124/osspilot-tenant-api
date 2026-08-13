@@ -536,3 +536,96 @@ paths:
       responses:
         "200":
           description: deleted assignment
+  /api/api-access:
+    get:
+      summary: Tenant Open API access status
+      responses:
+        "200":
+          description: status
+  /api/api-access/request:
+    post:
+      summary: Request Open API access (pending until ops approval)
+      responses:
+        "200":
+          description: status
+  /api/applications:
+    get:
+      summary: List tenant applications
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create a tenant application
+      responses:
+        "201":
+          description: created
+  /api/applications/{application_id}:
+    put:
+      summary: Update a tenant application
+      responses:
+        "200":
+          description: item
+    delete:
+      summary: Delete a tenant application
+      responses:
+        "204":
+          description: deleted
+  /api/applications/{application_id}/access-keys:
+    get:
+      summary: List application access keys
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create an access key; secret returned only once
+      responses:
+        "201":
+          description: created with secret_access_key
+  /api/applications/{application_id}/access-keys/{key_id}:
+    delete:
+      summary: Disable an access key
+      responses:
+        "200":
+          description: disabled item
+  /api/sts/credentials:
+    post:
+      summary: Issue local STS session token for an access key
+      responses:
+        "200":
+          description: temporary credentials
+  /api/v1/buckets:
+    get:
+      summary: Open API list buckets (OSSAccessKey / OSSSession)
+      responses:
+        "200":
+          description: items
+  /api/v1/buckets/{bucket_name}:
+    get:
+      summary: Open API get bucket
+      responses:
+        "200":
+          description: detail
+  /api/v1/buckets/{bucket_name}/objects:
+    get:
+      summary: Open API list objects
+      responses:
+        "200":
+          description: items
+  /api/v1/uploads/presign:
+    post:
+      summary: Open API presign upload
+      responses:
+        "200":
+          description: url
+  /api/v1/downloads/presign:
+    post:
+      summary: Open API presign download
+      responses:
+        "200":
+          description: url
+  /api/v1/sts/credentials:
+    post:
+      summary: Open API issue STS (requires OSSAccessKey)
+      responses:
+        "200":
+          description: temporary credentials

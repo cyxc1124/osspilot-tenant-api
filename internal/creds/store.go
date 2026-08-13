@@ -1,0 +1,231 @@
+package creds
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type Store struct {
+	pool *pgxpool.Pool
+}
+
+func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+type AccessRow struct {
+	AccountID   int64
+	Status      string
+	RequestedAt *time.Time
+	ReviewedAt  *time.Time
+	ReviewNote  *string
+	RGWUID      *string
+}
+
+type App struct {
+	ID          int64
+	AccountID   int64
+	Name        string
+	Description *string
+	Status      string
+	CreatedBy   int64
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	KeyCount    int64
+}
+
+type Key struct {
+	ID            int64
+	ApplicationID int64
+	AccountID     int64
+	AccessKeyID   string
+	SecretHash    string
+	Status        string
+	Description   *string
+	LastUsedAt    *time.Time
+	CreatedBy     int64
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+func (s *Store) GetAccess(ctx context.Context, accountID int64) (*AccessRow, error) {
+	var a AccessRow
+	err := s.pool.QueryRow(ctx, `
+		SELECT account_id, status, requested_at, reviewed_at, review_note, rgw_uid
+		FROM tenant_api_access WHERE account_id = $1`, accountID).
+		Scan(&a.AccountID, &a.Status, &a.RequestedAt, &a.ReviewedAt, &a.ReviewNote, &a.RGWUID)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+func (s *Store) RequestAccess(ctx context.Context, accountID, userID int64, note *string) (*AccessRow, error) {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO tenant_api_access (account_id, status, requested_by, requested_at, review_note)
+		VALUES ($1,'pending',$2,now(),$3)
+		ON CONFLICT (account_id) DO UPDATE SET
+			status = 'pending',
+			requested_by = EXCLUDED.requested_by,
+			requested_at = now(),
+			reviewed_at = NULL,
+			review_note = EXCLUDED.review_note,
+			updated_at = now()`, accountID, userID, note)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetAccess(ctx, accountID)
+}
+
+func (s *Store) ListApps(ctx context.Context, accountID int64) ([]App, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT a.id, a.account_id, a.name, a.description, a.status, a.created_by, a.created_at, a.updated_at,
+			(SELECT count(*) FROM application_access_keys k WHERE k.application_id = a.id)
+		FROM tenant_applications a WHERE a.account_id = $1 ORDER BY a.created_at DESC`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []App
+	for rows.Next() {
+		var a App
+		if err := rows.Scan(&a.ID, &a.AccountID, &a.Name, &a.Description, &a.Status, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt, &a.KeyCount); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetApp(ctx context.Context, accountID, id int64) (*App, error) {
+	var a App
+	err := s.pool.QueryRow(ctx, `
+		SELECT a.id, a.account_id, a.name, a.description, a.status, a.created_by, a.created_at, a.updated_at,
+			(SELECT count(*) FROM application_access_keys k WHERE k.application_id = a.id)
+		FROM tenant_applications a WHERE a.id = $1 AND a.account_id = $2`, id, accountID).
+		Scan(&a.ID, &a.AccountID, &a.Name, &a.Description, &a.Status, &a.CreatedBy, &a.CreatedAt, &a.UpdatedAt, &a.KeyCount)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+func (s *Store) InsertApp(ctx context.Context, accountID, userID int64, name string, desc *string) (*App, error) {
+	var id int64
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO tenant_applications (account_id, name, description, created_by)
+		VALUES ($1,$2,$3,$4) RETURNING id`, accountID, name, desc, userID).Scan(&id)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetApp(ctx, accountID, id)
+}
+
+func (s *Store) UpdateApp(ctx context.Context, accountID, id int64, name, desc, status *string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE tenant_applications SET
+			name = COALESCE($3, name),
+			description = COALESCE($4, description),
+			status = COALESCE($5, status),
+			updated_at = now()
+		WHERE id = $1 AND account_id = $2`, id, accountID, name, desc, status)
+	return err
+}
+
+func (s *Store) DeleteApp(ctx context.Context, accountID, id int64) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM tenant_applications WHERE id = $1 AND account_id = $2`, id, accountID)
+	return err
+}
+
+func (s *Store) ListKeys(ctx context.Context, accountID, appID int64) ([]Key, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, application_id, account_id, access_key_id, secret_key_hash, status, description, last_used_at, created_at, updated_at
+		FROM application_access_keys WHERE account_id = $1 AND application_id = $2 ORDER BY created_at DESC`, accountID, appID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Key
+	for rows.Next() {
+		k, err := scanKey(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) InsertKey(ctx context.Context, k *Key) error {
+	return s.pool.QueryRow(ctx, `
+		INSERT INTO application_access_keys (
+			application_id, account_id, access_key_id, secret_key_hash, description, created_by
+		) VALUES ($1,$2,$3,$4,$5,$6)
+		RETURNING id, created_at, updated_at, status`,
+		k.ApplicationID, k.AccountID, k.AccessKeyID, k.SecretHash, k.Description, k.CreatedBy).
+		Scan(&k.ID, &k.CreatedAt, &k.UpdatedAt, &k.Status)
+}
+
+func (s *Store) GetKey(ctx context.Context, accountID, appID, id int64) (*Key, error) {
+	k, err := scanKey(s.pool.QueryRow(ctx, `
+		SELECT id, application_id, account_id, access_key_id, secret_key_hash, status, description, last_used_at, created_at, updated_at
+		FROM application_access_keys WHERE id = $1 AND application_id = $2 AND account_id = $3`, id, appID, accountID))
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &k, nil
+}
+
+func (s *Store) GetKeyByAccessID(ctx context.Context, accessKeyID string) (*Key, error) {
+	k, err := scanKey(s.pool.QueryRow(ctx, `
+		SELECT id, application_id, account_id, access_key_id, secret_key_hash, status, description, last_used_at, created_at, updated_at
+		FROM application_access_keys WHERE access_key_id = $1`, accessKeyID))
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &k, nil
+}
+
+func (s *Store) DisableKey(ctx context.Context, accountID, appID, id int64) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE application_access_keys SET status = 'disabled', updated_at = now()
+		WHERE id = $1 AND application_id = $2 AND account_id = $3`, id, appID, accountID)
+	return err
+}
+
+func (s *Store) TouchKey(ctx context.Context, id int64) error {
+	_, err := s.pool.Exec(ctx, `UPDATE application_access_keys SET last_used_at = now() WHERE id = $1`, id)
+	return err
+}
+
+type keyRow interface{ Scan(dest ...any) error }
+
+func scanKey(row keyRow) (Key, error) {
+	var k Key
+	err := row.Scan(&k.ID, &k.ApplicationID, &k.AccountID, &k.AccessKeyID, &k.SecretHash, &k.Status, &k.Description, &k.LastUsedAt, &k.CreatedAt, &k.UpdatedAt)
+	if err != nil {
+		return Key{}, fmt.Errorf("scan key: %w", err)
+	}
+	return k, nil
+}
+
+func isUnique(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.Code == "23505"
+}

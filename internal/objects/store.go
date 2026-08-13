@@ -17,6 +17,33 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
+func (s *Store) Folded(ctx context.Context, bucketID int64, prefix, after string, maxKeys int) ([]ObjectItem, []string, *string, bool, error) {
+	if maxKeys < 1 {
+		maxKeys = 1
+	}
+	if maxKeys > maxListKeys {
+		maxKeys = maxListKeys
+	}
+	recs, err := s.ListPrefix(ctx, bucketID, prefix, after, scanCap)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
+	items, prefixes, token, truncated := foldList(prefix, maxKeys, recs, len(recs) == scanCap)
+	out := make([]ObjectItem, 0, len(items))
+	for _, rec := range items {
+		out = append(out, ObjectItem{Key: rec.Key, Size: rec.Size, ContentType: rec.ContentType, LastModified: rec.LastModified, ETag: rec.ETag})
+	}
+	return out, prefixes, token, truncated, nil
+}
+
+type ObjectItem struct {
+	Key          string
+	Size         int64
+	ContentType  *string
+	LastModified *string
+	ETag         *string
+}
+
 func (s *Store) ListPrefix(ctx context.Context, bucketID int64, prefix, after string, limit int) ([]record, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT object_key, COALESCE(size, 0), content_type, etag, created_by,

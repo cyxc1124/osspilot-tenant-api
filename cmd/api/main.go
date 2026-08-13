@@ -12,6 +12,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/config"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/creds"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/downloads"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/edit"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
@@ -37,6 +38,7 @@ type apiHandlers struct {
 	share     *share.Handler
 	edit      *edit.Handler
 	rbac      *rbac.Handler
+	creds     *creds.Handler
 }
 
 func newMux(h apiHandlers) http.Handler {
@@ -75,6 +77,9 @@ func newMux(h apiHandlers) http.Handler {
 	if h.rbac != nil {
 		h.rbac.Register(mux)
 	}
+	if h.creds != nil {
+		h.creds.Register(mux)
+	}
 	return httpx.CORS(mux)
 }
 
@@ -98,6 +103,7 @@ func main() {
 	var shareStore *share.Store
 	var editStore *edit.Store
 	var rbacStore *rbac.Store
+	var credsStore *creds.Store
 	if cfg.DatabaseURL != "" {
 		pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
 		if err != nil {
@@ -114,6 +120,7 @@ func main() {
 		shareStore = share.NewStore(pool)
 		editStore = edit.NewStore(pool)
 		rbacStore = rbac.NewStore(pool)
+		credsStore = creds.NewStore(pool)
 	} else {
 		slog.Warn("DATABASE_URL unset; auth routes return 503")
 	}
@@ -151,6 +158,7 @@ func main() {
 	editH := edit.NewHandler(editStore, bucketStore, versionStore, settingsStore, s3c, authH.RequireUser, edit.OfficeEnv{
 		URL: cfg.OfficeURL, JWTSecret: cfg.OfficeJWTSecret, PublicURL: cfg.PublicURL,
 	}, ac)
+	credsH := creds.NewHandler(credsStore, authH.RequireUser, ac, cfg.S3Endpoint, cfg.S3Region, cfg.JWTSecret, bucketStore, objectStore, uploadStore, s3c)
 	if cfg.ProjectionSecret == "" {
 		slog.Warn("PROJECTION_SECRET unset; internal projection routes return 503")
 	}
@@ -158,7 +166,7 @@ func main() {
 	slog.Info("listen", "addr", addr)
 	if err := http.ListenAndServe(addr, newMux(apiHandlers{
 		auth: authH, bucket: bucketH, objects: objectH, uploads: uploadH, downloads: downloadH,
-		platform: platformH, project: projectH, versions: versionH, share: shareH, edit: editH, rbac: rbacH,
+		platform: platformH, project: projectH, versions: versionH, share: shareH, edit: editH, rbac: rbacH, creds: credsH,
 	})); err != nil {
 		slog.Error("server", "err", err)
 		os.Exit(1)
