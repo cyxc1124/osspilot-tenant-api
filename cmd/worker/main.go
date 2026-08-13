@@ -14,6 +14,8 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/uploads"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/versions"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/worker"
 )
 
@@ -54,6 +56,8 @@ func main() {
 	jobs := &worker.Jobs{
 		Buckets:  bucket.NewStore(pool),
 		Objects:  objects.NewStore(pool),
+		Versions: versions.NewStore(pool),
+		Uploads:  uploads.NewStore(pool),
 		Settings: platform.NewStore(pool),
 		S3:       storage.New(s3cfg),
 	}
@@ -62,6 +66,8 @@ func main() {
 	mux.HandleFunc(worker.TaskInventory, jobs.Inventory)
 	mux.HandleFunc(worker.TaskInventoryBucket, jobs.InventoryBucket)
 	mux.HandleFunc(worker.TaskTrash, jobs.Trash)
+	mux.HandleFunc(worker.TaskVersions, jobs.CleanVersions)
+	mux.HandleFunc(worker.TaskMultipart, jobs.CleanMultipart)
 
 	srv := asynq.NewServer(redisOpt, asynq.Config{Concurrency: 2})
 	scheduler := asynq.NewScheduler(redisOpt, nil)
@@ -71,6 +77,14 @@ func main() {
 	}
 	if _, err := scheduler.Register("@every 1h", asynq.NewTask(worker.TaskTrash, nil)); err != nil {
 		slog.Error("schedule trash", "err", err)
+		os.Exit(1)
+	}
+	if _, err := scheduler.Register("@every 6h", asynq.NewTask(worker.TaskVersions, nil)); err != nil {
+		slog.Error("schedule versions", "err", err)
+		os.Exit(1)
+	}
+	if _, err := scheduler.Register("@every 6h", asynq.NewTask(worker.TaskMultipart, nil)); err != nil {
+		slog.Error("schedule multipart", "err", err)
 		os.Exit(1)
 	}
 

@@ -15,17 +15,23 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/queue"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/uploads"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/versions"
 )
 
 const (
 	TaskInventory       = "objects:inventory"
 	TaskInventoryBucket = queue.TaskInventoryBucket
 	TaskTrash           = "objects:trash"
+	TaskVersions        = "objects:versions"
+	TaskMultipart       = "objects:multipart"
 )
 
 type Jobs struct {
 	Buckets  *bucket.Store
 	Objects  *objects.Store
+	Versions *versions.Store
+	Uploads  *uploads.Store
 	Settings *platform.Store
 	S3       *storage.Client
 }
@@ -122,4 +128,69 @@ func (j *Jobs) Trash(ctx context.Context, _ *asynq.Task) error {
 
 func shouldCleanupTrash(enabled bool, days int) bool {
 	return enabled && days >= 1
+}
+
+func (j *Jobs) CleanVersions(ctx context.Context, _ *asynq.Task) error {
+	if j.Settings == nil || j.Versions == nil {
+		return nil
+	}
+	days, enabled, err := j.Settings.VersionPolicy(ctx)
+	if err != nil {
+		return err
+	}
+	if !shouldCleanupTrash(enabled, days) {
+		slog.Info("version cleanup skipped", "enabled", enabled, "days", days)
+		return nil
+	}
+	items, err := j.Versions.Expired(ctx, days)
+	if err != nil {
+		return err
+	}
+	var deleted int
+	for _, item := range items {
+		if err := j.S3.DeleteObject(ctx, item.BucketName, item.StorageKey); err != nil {
+			slog.Warn("version delete storage", "bucket", item.BucketName, "key", item.StorageKey, "err", err)
+			continue
+		}
+		if err := j.Versions.Delete(ctx, item.ID); err != nil {
+			return err
+		}
+		deleted++
+	}
+	slog.Info("version cleanup done", "deleted", deleted)
+	return nil
+}
+
+func (j *Jobs) CleanMultipart(ctx context.Context, _ *asynq.Task) error {
+	if j.Settings == nil || j.Uploads == nil {
+		return nil
+	}
+	days, enabled, err := j.Settings.MultipartPolicy(ctx)
+	if err != nil {
+		return err
+	}
+	if !shouldCleanupTrash(enabled, days) {
+		slog.Info("multipart cleanup skipped", "enabled", enabled, "days", days)
+		return nil
+	}
+	items, err := j.Uploads.StaleMultipart(ctx, days)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	var aborted int
+	for _, item := range items {
+		if item.UploadID != nil && *item.UploadID != "" {
+			if err := j.S3.AbortMultipart(ctx, item.BucketName, item.ObjectKey, *item.UploadID); err != nil {
+				slog.Warn("multipart abort storage", "bucket", item.BucketName, "key", item.ObjectKey, "err", err)
+				continue
+			}
+		}
+		if err := j.Uploads.Finish(ctx, item.ID, uploads.StatusAbort, now); err != nil {
+			return err
+		}
+		aborted++
+	}
+	slog.Info("multipart cleanup done", "aborted", aborted)
+	return nil
 }

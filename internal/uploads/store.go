@@ -69,3 +69,27 @@ func (s *Store) Finish(ctx context.Context, id int64, status string, at time.Tim
 	_, err := s.pool.Exec(ctx, `UPDATE upload_tasks SET status = $2, completed_at = $3 WHERE id = $1`, id, status, at)
 	return err
 }
+
+// StaleMultipart returns pending multipart tasks past age or expired_at.
+func (s *Store) StaleMultipart(ctx context.Context, staleDays int) ([]Task, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, user_id, bucket_name, object_key, upload_type, upload_id, size, content_type, status
+		FROM upload_tasks
+		WHERE upload_type = $1 AND status = $2
+		  AND (expired_at < now() OR created_at < now() - ($3 * interval '1 day'))
+		ORDER BY id
+		LIMIT 5000`, TypeMultipart, StatusPending, staleDays)
+	if err != nil {
+		return nil, fmt.Errorf("stale multipart: %w", err)
+	}
+	defer rows.Close()
+	var out []Task
+	for rows.Next() {
+		var t Task
+		if err := rows.Scan(&t.ID, &t.UserID, &t.BucketName, &t.ObjectKey, &t.UploadType, &t.UploadID, &t.Size, &t.ContentType, &t.Status); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
