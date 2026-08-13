@@ -11,13 +11,14 @@ import (
 )
 
 type Handler struct {
-	store   *Store
-	s3      *storage.Client
-	protect func(auth.UserHandler) http.HandlerFunc
+	store       *Store
+	s3          *storage.Client
+	protect     func(auth.UserHandler) http.HandlerFunc
+	corsOrigins []string
 }
 
-func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, s3 *storage.Client) *Handler {
-	return &Handler{store: store, protect: protect, s3: s3}
+func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, s3 *storage.Client, corsOrigins []string) *Handler {
+	return &Handler{store: store, protect: protect, s3: s3, corsOrigins: corsOrigins}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -26,6 +27,12 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/buckets/{bucket_name}", h.protect(h.get))
 	mux.HandleFunc("PUT /api/buckets/{bucket_name}", h.protect(h.update))
 	mux.HandleFunc("DELETE /api/buckets/{bucket_name}", h.protect(h.remove))
+	mux.HandleFunc("GET /api/buckets/{bucket_name}/policy", h.protect(h.getPolicy))
+	mux.HandleFunc("PUT /api/buckets/{bucket_name}/policy", h.protect(h.putPolicy))
+	mux.HandleFunc("DELETE /api/buckets/{bucket_name}/policy", h.protect(h.deletePolicy))
+	mux.HandleFunc("GET /api/buckets/{bucket_name}/cors", h.protect(h.getCors))
+	mux.HandleFunc("PUT /api/buckets/{bucket_name}/cors", h.protect(h.putCors))
+	mux.HandleFunc("DELETE /api/buckets/{bucket_name}/cors", h.protect(h.deleteCors))
 }
 
 type createRequest struct {
@@ -140,6 +147,14 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 			_ = h.store.Delete(r.Context(), b.ID)
 			httpx.Error(w, http.StatusBadGateway, "storage error")
 			return
+		}
+		if rules := defaultCorsRules(h.corsOrigins); len(rules) > 0 {
+			if err := h.s3.PutBucketCORS(r.Context(), b.BucketName, toStorageCORS(rules)); err != nil {
+				_ = h.s3.DeleteBucket(r.Context(), b.BucketName)
+				_ = h.store.Delete(r.Context(), b.ID)
+				httpx.Error(w, http.StatusBadGateway, "storage error")
+				return
+			}
 		}
 	}
 	httpx.JSON(w, http.StatusCreated, toDetail(*b))

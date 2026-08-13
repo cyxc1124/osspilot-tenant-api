@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -193,7 +194,129 @@ func (c *Client) AbortMultipart(ctx context.Context, bucket, key, uploadID strin
 	return err
 }
 
+func (c *Client) GetBucketPolicy(ctx context.Context, bucket string) (map[string]any, error) {
+	out, err := c.s3.GetBucketPolicy(ctx, &s3.GetBucketPolicyInput{Bucket: aws.String(bucket)})
+	if err != nil {
+		if isNoPolicy(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if out.Policy == nil || *out.Policy == "" {
+		return nil, nil
+	}
+	var doc any
+	if err := json.Unmarshal([]byte(*out.Policy), &doc); err != nil {
+		return nil, err
+	}
+	obj, ok := doc.(map[string]any)
+	if !ok {
+		return nil, errors.New("Bucket policy is not a JSON object")
+	}
+	return obj, nil
+}
+
+func (c *Client) PutBucketPolicy(ctx context.Context, bucket string, policy map[string]any) error {
+	raw, err := json.Marshal(policy)
+	if err != nil {
+		return err
+	}
+	_, err = c.s3.PutBucketPolicy(ctx, &s3.PutBucketPolicyInput{
+		Bucket: aws.String(bucket), Policy: aws.String(string(raw)),
+	})
+	return err
+}
+
+func (c *Client) DeleteBucketPolicy(ctx context.Context, bucket string) error {
+	_, err := c.s3.DeleteBucketPolicy(ctx, &s3.DeleteBucketPolicyInput{Bucket: aws.String(bucket)})
+	if err != nil && isNoPolicy(err) {
+		return nil
+	}
+	return err
+}
+
+type CORSRule struct {
+	AllowedOrigins []string
+	AllowedMethods []string
+	AllowedHeaders []string
+	ExposeHeaders  []string
+	MaxAgeSeconds  *int32
+}
+
+func (c *Client) GetBucketCORS(ctx context.Context, bucket string) ([]CORSRule, error) {
+	out, err := c.s3.GetBucketCors(ctx, &s3.GetBucketCorsInput{Bucket: aws.String(bucket)})
+	if err != nil {
+		if isNoCORS(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return corsFromS3(out.CORSRules), nil
+}
+
+func (c *Client) PutBucketCORS(ctx context.Context, bucket string, rules []CORSRule) error {
+	_, err := c.s3.PutBucketCors(ctx, &s3.PutBucketCorsInput{
+		Bucket:            aws.String(bucket),
+		CORSConfiguration: &types.CORSConfiguration{CORSRules: corsToS3(rules)},
+	})
+	return err
+}
+
+func (c *Client) DeleteBucketCORS(ctx context.Context, bucket string) error {
+	_, err := c.s3.DeleteBucketCors(ctx, &s3.DeleteBucketCorsInput{Bucket: aws.String(bucket)})
+	if err != nil && isNoCORS(err) {
+		return nil
+	}
+	return err
+}
+
 func (c *Client) UploadTTLSeconds() int { return int(c.uploadTTL.Seconds()) }
+
+func corsToS3(rules []CORSRule) []types.CORSRule {
+	out := make([]types.CORSRule, 0, len(rules))
+	for _, r := range rules {
+		item := types.CORSRule{
+			AllowedOrigins: r.AllowedOrigins,
+			AllowedMethods: r.AllowedMethods,
+		}
+		if len(r.AllowedHeaders) > 0 {
+			item.AllowedHeaders = r.AllowedHeaders
+		}
+		if len(r.ExposeHeaders) > 0 {
+			item.ExposeHeaders = r.ExposeHeaders
+		}
+		item.MaxAgeSeconds = r.MaxAgeSeconds
+		out = append(out, item)
+	}
+	return out
+}
+
+func corsFromS3(rules []types.CORSRule) []CORSRule {
+	out := make([]CORSRule, 0, len(rules))
+	for _, r := range rules {
+		item := CORSRule{
+			AllowedOrigins: append([]string(nil), r.AllowedOrigins...),
+			AllowedMethods: append([]string(nil), r.AllowedMethods...),
+			AllowedHeaders: append([]string(nil), r.AllowedHeaders...),
+			ExposeHeaders:  append([]string(nil), r.ExposeHeaders...),
+		}
+		if r.MaxAgeSeconds != nil {
+			n := *r.MaxAgeSeconds
+			item.MaxAgeSeconds = &n
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func isNoPolicy(err error) bool {
+	return apiCode(err) == "NoSuchBucketPolicy"
+}
+
+func isNoCORS(err error) bool {
+	code := apiCode(err)
+	return code == "NoSuchCORSConfiguration" || code == "NoSuchBucketCORSConfiguration"
+}
 
 func apiCode(err error) string {
 	var api smithy.APIError

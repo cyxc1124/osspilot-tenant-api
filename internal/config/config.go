@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -21,6 +22,7 @@ type Config struct {
 	ObjectHTTPDomain  string
 	ObjectHTTPSDomain string
 	ProjectionSecret  string
+	CORSOrigins       []string
 }
 
 func Load() Config {
@@ -41,7 +43,25 @@ func Load() Config {
 		ObjectHTTPDomain:  os.Getenv("OBJECT_HTTP_DOMAIN"),
 		ObjectHTTPSDomain: os.Getenv("OBJECT_HTTPS_DOMAIN"),
 		ProjectionSecret:  os.Getenv("PROJECTION_SECRET"),
+		CORSOrigins:       parseOrigins(os.Getenv("TENANT_CORS_ORIGINS")),
 	}
+}
+
+func parseOrigins(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return []string{"http://localhost:5173"}
+	}
+	var out []string
+	for _, p := range strings.Split(raw, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return []string{"http://localhost:5173"}
+	}
+	return out
 }
 
 func getenv(key, fallback string) string {

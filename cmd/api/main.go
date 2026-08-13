@@ -94,7 +94,7 @@ func main() {
 	}
 
 	authH := auth.NewHandler(authStore, cfg.JWTSecret, cfg.TokenTTL)
-	bucketH := bucket.NewHandler(bucketStore, authH.RequireUser, s3c)
+	bucketH := bucket.NewHandler(bucketStore, authH.RequireUser, s3c, cfg.CORSOrigins)
 	objectH := objects.NewHandler(bucketStore, objectStore, s3c, authH.RequireUser)
 	uploadH := uploads.NewHandler(s3c, bucketStore, objectStore, uploadStore, authH.RequireUser)
 	downloadH := downloads.NewHandler(s3c, bucketStore, authH.RequireUser)

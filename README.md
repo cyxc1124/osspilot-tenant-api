@@ -15,7 +15,9 @@ go run ./cmd/api
 
 - `GET /healthz`
 - `POST /api/login`、`POST /api/logout`、`GET /api/me`、`POST /api/password/change`
-- `GET|POST /api/buckets`、`GET|PUT|DELETE /api/buckets/{bucket_name}`（有 S3 时建桶会同时 CreateBucket；列表与读写只含当前账号已授权的桶）
+- `GET|POST /api/buckets`、`GET|PUT|DELETE /api/buckets/{bucket_name}`（有 S3 时建桶会同时 CreateBucket，并写入 `TENANT_CORS_ORIGINS` 默认 CORS；列表与读写只含当前账号已授权的桶）
+- `GET|PUT|DELETE /api/buckets/{bucket_name}/policy`
+- `GET|PUT|DELETE /api/buckets/{bucket_name}/cors`
 - `GET /api/buckets/{bucket_name}/objects`、`GET .../objects/detail`、`POST .../objects/directories`
 - `POST /api/uploads/presign|complete`、`POST /api/uploads/multipart/{init,parts,complete,abort}`
 - `POST /api/downloads/presign`、`POST /api/downloads/batch`

@@ -73,6 +73,42 @@ paths:
       responses:
         "204":
           description: deleted
+  /api/buckets/{bucket_name}/policy:
+    get:
+      summary: Get S3 bucket policy
+      responses:
+        "200":
+          description: policy or empty
+    put:
+      summary: Replace S3 bucket policy
+      responses:
+        "200":
+          description: saved
+        "400":
+          description: invalid policy
+    delete:
+      summary: Delete S3 bucket policy
+      responses:
+        "204":
+          description: deleted
+  /api/buckets/{bucket_name}/cors:
+    get:
+      summary: Get bucket CORS rules
+      responses:
+        "200":
+          description: rules
+    put:
+      summary: Replace bucket CORS rules
+      responses:
+        "200":
+          description: saved
+        "400":
+          description: invalid rules
+    delete:
+      summary: Delete bucket CORS
+      responses:
+        "204":
+          description: deleted
   /api/buckets/{bucket_name}/objects:
     get:
       summary: List object metadata
