@@ -215,3 +215,58 @@ func (s *Store) MoveKey(ctx context.Context, bucketID int64, bucketName, from, t
 	}
 	return nil
 }
+
+func (s *Store) UpsertSeen(ctx context.Context, bucketID int64, bucketName, key string, size int64, etag, storageClass *string, seenAt time.Time) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO object_records (
+			bucket_id, bucket_name, object_key, size, etag, storage_class, last_seen_at, created_at, updated_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$7)
+		ON CONFLICT (bucket_id, object_key) DO UPDATE SET
+			size = EXCLUDED.size,
+			etag = EXCLUDED.etag,
+			storage_class = EXCLUDED.storage_class,
+			last_seen_at = EXCLUDED.last_seen_at,
+			updated_at = EXCLUDED.updated_at`,
+		bucketID, bucketName, key, size, etag, storageClass, seenAt)
+	if err != nil {
+		return fmt.Errorf("upsert seen: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) PurgeUnseen(ctx context.Context, bucketID int64, seenAt time.Time) error {
+	_, err := s.pool.Exec(ctx, `
+		DELETE FROM object_records
+		WHERE bucket_id = $1 AND (last_seen_at IS NULL OR last_seen_at < $2)`, bucketID, seenAt)
+	if err != nil {
+		return fmt.Errorf("purge unseen: %w", err)
+	}
+	return nil
+}
+
+type TrashObject struct {
+	BucketID   int64
+	BucketName string
+	Key        string
+}
+
+func (s *Store) ExpiredTrash(ctx context.Context, days int) ([]TrashObject, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT bucket_id, bucket_name, object_key
+		FROM object_records
+		WHERE object_key LIKE '.trash/%' AND object_key <> '.trash/'
+		  AND COALESCE(last_seen_at, updated_at) < now() - ($1 * interval '1 day')`, days)
+	if err != nil {
+		return nil, fmt.Errorf("expired trash: %w", err)
+	}
+	defer rows.Close()
+	var out []TrashObject
+	for rows.Next() {
+		var item TrashObject
+		if err := rows.Scan(&item.BucketID, &item.BucketName, &item.Key); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}

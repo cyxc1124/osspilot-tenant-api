@@ -26,6 +26,7 @@ type Config struct {
 	PublicURL         string
 	ProjectionSecret  string
 	CORSOrigins       []string
+	RedisURL          string
 }
 
 func Load() Config {
@@ -54,6 +55,7 @@ func Load() Config {
 		PublicURL:         strings.TrimRight(getenv("TENANT_API_PUBLIC_URL", "http://localhost:8000"), "/"),
 		ProjectionSecret:  os.Getenv("PROJECTION_SECRET"),
 		CORSOrigins:       parseOrigins(os.Getenv("TENANT_CORS_ORIGINS")),
+		RedisURL:          os.Getenv("REDIS_URL"),
 	}
 }
 

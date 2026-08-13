@@ -71,3 +71,11 @@ func pickBool(rows map[string]string, key string, fallback bool) bool {
 	}
 	return fallback
 }
+
+func (s *Store) TrashPolicy(ctx context.Context) (days int, enabled bool, err error) {
+	rows, err := s.Map(ctx)
+	if err != nil {
+		return 0, false, err
+	}
+	return pickInt(rows, "trash_retention_days", 0), pickBool(rows, "trash_cleanup_enabled", false), nil
+}

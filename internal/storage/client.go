@@ -336,6 +336,49 @@ func (c *Client) DeleteBucketCORS(ctx context.Context, bucket string) error {
 
 func (c *Client) UploadTTLSeconds() int { return int(c.uploadTTL.Seconds()) }
 
+type ListedObject struct {
+	Key          string
+	Size         int64
+	ETag         *string
+	StorageClass *string
+}
+
+type ListPage struct {
+	Objects   []ListedObject
+	Truncated bool
+	Token     string
+}
+
+func (c *Client) ListObjects(ctx context.Context, bucket, token string, maxKeys int32) (ListPage, error) {
+	if maxKeys < 1 {
+		maxKeys = 1000
+	}
+	in := &s3.ListObjectsV2Input{Bucket: aws.String(bucket), MaxKeys: aws.Int32(maxKeys)}
+	if token != "" {
+		in.ContinuationToken = aws.String(token)
+	}
+	out, err := c.s3.ListObjectsV2(ctx, in)
+	if err != nil {
+		return ListPage{}, err
+	}
+	page := ListPage{Truncated: aws.ToBool(out.IsTruncated)}
+	if out.NextContinuationToken != nil {
+		page.Token = *out.NextContinuationToken
+	}
+	for _, obj := range out.Contents {
+		item := ListedObject{Size: aws.ToInt64(obj.Size), ETag: stripETag(obj.ETag), StorageClass: (*string)(nil)}
+		if obj.Key != nil {
+			item.Key = *obj.Key
+		}
+		if obj.StorageClass != "" {
+			sc := string(obj.StorageClass)
+			item.StorageClass = &sc
+		}
+		page.Objects = append(page.Objects, item)
+	}
+	return page, nil
+}
+
 func corsToS3(rules []CORSRule) []types.CORSRule {
 	out := make([]types.CORSRule, 0, len(rules))
 	for _, r := range rules {

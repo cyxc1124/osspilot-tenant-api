@@ -216,6 +216,23 @@ func (s *Store) UsageByID(ctx context.Context, ids []int64) (map[int64]Usage, er
 	return out, rows.Err()
 }
 
+func (s *Store) ListActive(ctx context.Context) ([]Bucket, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+bucketCols+` FROM buckets WHERE status = 'active' ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("list active buckets: %w", err)
+	}
+	defer rows.Close()
+	var out []Bucket
+	for rows.Next() {
+		b, err := scanBucket(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }
