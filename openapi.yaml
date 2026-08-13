@@ -73,3 +73,15 @@ paths:
       responses:
         "204":
           description: deleted
+  /api/buckets/{bucket_name}/objects:
+    get:
+      summary: List object metadata
+      responses:
+        "200":
+          description: items and prefixes
+  /api/buckets/{bucket_name}/objects/detail:
+    get:
+      summary: Object metadata
+      responses:
+        "200":
+          description: detail

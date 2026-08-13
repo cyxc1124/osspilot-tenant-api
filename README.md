@@ -16,6 +16,7 @@ go run ./cmd/api
 - `GET /healthz`
 - `POST /api/login`、`POST /api/logout`、`GET /api/me`、`POST /api/password/change`
 - `GET|POST /api/buckets`、`GET|PUT|DELETE /api/buckets/{bucket_name}`（元数据；用量字段先为 0，不调 RGW）
+- `GET /api/buckets/{bucket_name}/objects`、`GET /api/buckets/{bucket_name}/objects/detail`（读 `object_records`，不调 RGW）
 
 租户不内置账号。用户带 `must_change_password=true` 时，除改密、`/api/me`、登出外一律 403。新密码至少 8 位且不能与旧密码相同。
 
