@@ -20,6 +20,9 @@ type User struct {
 	Role               string
 	MustChangePassword bool
 	AccountID          int64
+	QuotaBytes         *int64
+	ObjectLimit        *int64
+	DailyUploadBytes   *int64
 	CreatedAt          time.Time
 	LastLoginAt        *time.Time
 }
@@ -33,7 +36,7 @@ func NewStore(pool *pgxpool.Pool) *Store {
 }
 
 const userCols = `id, username, password_hash, display_name, email, phone, status, role, must_change_password,
-	COALESCE(account_id, id), created_at, last_login_at`
+	COALESCE(account_id, id), quota_bytes, object_limit, daily_upload_bytes, created_at, last_login_at`
 
 func (s *Store) GetByUsername(ctx context.Context, username string) (*User, error) {
 	return s.scanUser(ctx, `SELECT `+userCols+` FROM tenant_users WHERE username = $1`, username)
@@ -57,8 +60,9 @@ func (s *Store) Upsert(ctx context.Context, u Upsert) (int64, error) {
 	var id int64
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO tenant_users (
-			username, password_hash, display_name, email, phone, status, role, must_change_password, created_at, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,'tenant_admin',COALESCE($7,true),now(),now())
+			username, password_hash, display_name, email, phone, status, role, must_change_password,
+			quota_bytes, object_limit, daily_upload_bytes, created_at, updated_at
+		) VALUES ($1,$2,$3,$4,$5,$6,'tenant_admin',COALESCE($7,true),$8,$9,$10,now(),now())
 		ON CONFLICT (username) DO UPDATE SET
 			password_hash = CASE WHEN EXCLUDED.password_hash <> '' THEN EXCLUDED.password_hash ELSE tenant_users.password_hash END,
 			display_name = EXCLUDED.display_name,
@@ -67,8 +71,12 @@ func (s *Store) Upsert(ctx context.Context, u Upsert) (int64, error) {
 			status = EXCLUDED.status,
 			role = 'tenant_admin',
 			must_change_password = COALESCE($7, tenant_users.must_change_password),
+			quota_bytes = EXCLUDED.quota_bytes,
+			object_limit = EXCLUDED.object_limit,
+			daily_upload_bytes = EXCLUDED.daily_upload_bytes,
 			updated_at = now()
-		RETURNING id`, u.Username, u.PasswordHash, u.DisplayName, u.Email, u.Phone, u.Status, u.MustChangePassword).Scan(&id)
+		RETURNING id`, u.Username, u.PasswordHash, u.DisplayName, u.Email, u.Phone, u.Status, u.MustChangePassword,
+		u.QuotaBytes, u.ObjectLimit, u.DailyUploadBytes).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("upsert user: %w", err)
 	}
@@ -94,6 +102,9 @@ type Upsert struct {
 	Phone              *string
 	Status             string
 	MustChangePassword *bool
+	QuotaBytes         *int64
+	ObjectLimit        *int64
+	DailyUploadBytes   *int64
 }
 
 func (s *Store) ListByAccount(ctx context.Context, accountID int64) ([]User, error) {
@@ -177,7 +188,7 @@ func scanUserRow(row userRow) (User, error) {
 	var u User
 	err := row.Scan(
 		&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &u.Email, &u.Phone, &u.Status, &u.Role, &u.MustChangePassword,
-		&u.AccountID, &u.CreatedAt, &u.LastLoginAt,
+		&u.AccountID, &u.QuotaBytes, &u.ObjectLimit, &u.DailyUploadBytes, &u.CreatedAt, &u.LastLoginAt,
 	)
 	return u, err
 }

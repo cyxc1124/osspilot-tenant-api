@@ -10,6 +10,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/quota"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/uploads"
 )
@@ -226,6 +227,10 @@ func (o *openAPI) presignUpload(w http.ResponseWriter, r *http.Request, p Princi
 	}
 	if b == nil {
 		httpx.Error(w, http.StatusNotFound, "Bucket not found")
+		return
+	}
+	if err := o.h.quota.Upload(r.Context(), p.AccountID, b, req.ObjectKey, req.Size); err != nil {
+		quota.Reject(w, err)
 		return
 	}
 	ct := ""

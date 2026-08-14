@@ -36,6 +36,9 @@ type accountReq struct {
 	Phone              *string `json:"phone"`
 	Status             string  `json:"status"`
 	MustChangePassword *bool   `json:"must_change_password"`
+	QuotaBytes         *int64  `json:"quota_bytes"`
+	ObjectLimit        *int64  `json:"object_limit"`
+	DailyUploadBytes   *int64  `json:"daily_upload_bytes"`
 }
 
 type bucketsReq struct {
@@ -73,6 +76,9 @@ func (h *Handler) upsert(w http.ResponseWriter, r *http.Request) {
 		Phone:              req.Phone,
 		Status:             status,
 		MustChangePassword: req.MustChangePassword,
+		QuotaBytes:         req.QuotaBytes,
+		ObjectLimit:        req.ObjectLimit,
+		DailyUploadBytes:   req.DailyUploadBytes,
 	}); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return

@@ -76,6 +76,18 @@ func (s *Store) ListPrefix(ctx context.Context, bucketID int64, prefix, after st
 	return out, rows.Err()
 }
 
+func (s *Store) Exists(ctx context.Context, bucketID int64, key string) (bool, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `SELECT 1 FROM object_records WHERE bucket_id = $1 AND object_key = $2`, bucketID, key).Scan(&n)
+	if err == pgx.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("object exists: %w", err)
+	}
+	return true, nil
+}
+
 func (s *Store) Get(ctx context.Context, bucketID int64, key string) (*record, error) {
 	var rec record
 	var last, created, updated time.Time

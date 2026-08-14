@@ -14,12 +14,13 @@ import (
 type Handler struct {
 	store   *Store
 	buckets *bucket.Store
+	users   *auth.Store
 	protect func(auth.UserHandler) http.HandlerFunc
 	ac      *rbac.Checker
 }
 
-func NewHandler(store *Store, buckets *bucket.Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker) *Handler {
-	return &Handler{store: store, buckets: buckets, protect: protect, ac: ac}
+func NewHandler(store *Store, buckets *bucket.Store, users *auth.Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker) *Handler {
+	return &Handler{store: store, buckets: buckets, users: users, protect: protect, ac: ac}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -100,12 +101,23 @@ func (h *Handler) account(w http.ResponseWriter, r *http.Request, user *auth.Use
 	if len(items) > 0 {
 		collected = time.Now().UTC().Format(time.RFC3339)
 	}
+	var quota *int64
+	if h.users != nil {
+		acc, err := h.users.GetByID(r.Context(), accountID)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "database error")
+			return
+		}
+		if acc != nil {
+			quota = acc.QuotaBytes
+		}
+	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
-		"tenant_id": accountID, "quota_bytes": nil, "used_bytes": used,
-		"remaining_bytes": remainingBytes(nil, used), "object_count": count,
+		"tenant_id": accountID, "quota_bytes": quota, "used_bytes": used,
+		"remaining_bytes": remainingBytes(quota, used), "object_count": count,
 		"trash_bytes": trashB, "trash_object_count": trashN,
 		"version_bytes": verB, "version_object_count": verN,
-		"usage_percent": usagePercent(used, nil), "collected_at": collected,
+		"usage_percent": usagePercent(used, quota), "collected_at": collected,
 	})
 }
 

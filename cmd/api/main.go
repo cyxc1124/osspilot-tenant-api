@@ -22,6 +22,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/preview"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/project"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/queue"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/quota"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/share"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/stats"
@@ -173,9 +174,10 @@ func main() {
 	} else {
 		slog.Warn("REDIS_URL unset; batch object ops and inventory enqueue return 503")
 	}
+	qc := quota.New(authStore, bucketStore, objectStore, uploadStore)
 	bucketH := bucket.NewHandler(bucketStore, authH.RequireUser, s3c, cfg.CORSOrigins, ac)
 	objectH := objects.NewHandler(bucketStore, objectStore, s3c, authH.RequireUser, ac, auditLog, q)
-	uploadH := uploads.NewHandler(s3c, bucketStore, objectStore, uploadStore, authH.RequireUser, ac, auditLog)
+	uploadH := uploads.NewHandler(s3c, bucketStore, objectStore, uploadStore, authH.RequireUser, ac, auditLog, qc)
 	downloadH := downloads.NewHandler(s3c, bucketStore, authH.RequireUser, ac)
 	platformH := platform.NewHandler(settingsStore, authH.RequireUser, platform.Fallbacks{
 		S3Endpoint:        cfg.S3Endpoint,
@@ -190,8 +192,8 @@ func main() {
 	editH := edit.NewHandler(editStore, bucketStore, versionStore, settingsStore, s3c, authH.RequireUser, edit.OfficeEnv{
 		URL: cfg.OfficeURL, JWTSecret: cfg.OfficeJWTSecret, PublicURL: cfg.PublicURL,
 	}, ac)
-	credsH := creds.NewHandler(credsStore, authH.RequireUser, ac, cfg.S3Endpoint, cfg.S3Region, cfg.JWTSecret, bucketStore, objectStore, uploadStore, s3c, auditLog)
-	statsH := stats.NewHandler(statsStore, bucketStore, authH.RequireUser, ac)
+	credsH := creds.NewHandler(credsStore, authH.RequireUser, ac, cfg.S3Endpoint, cfg.S3Region, cfg.JWTSecret, bucketStore, objectStore, uploadStore, s3c, auditLog, qc)
+	statsH := stats.NewHandler(statsStore, bucketStore, authStore, authH.RequireUser, ac)
 	auditH := audit.NewHandler(auditStore, authH.RequireUser, ac)
 	var usageH *stats.InternalHandler
 	if pool != nil {

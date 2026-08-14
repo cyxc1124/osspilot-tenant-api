@@ -11,6 +11,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/quota"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/uploads"
@@ -28,10 +29,11 @@ type Handler struct {
 	uploads *uploads.Store
 	s3      *storage.Client
 	log     *audit.Logger
+	quota   *quota.Checker
 }
 
-func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, s3Endpoint, s3Region, jwtSecret string, buckets *bucket.Store, objectStore *objects.Store, uploadStore *uploads.Store, s3 *storage.Client, log *audit.Logger) *Handler {
-	return &Handler{store: store, protect: protect, ac: ac, s3End: s3Endpoint, s3Reg: s3Region, secret: jwtSecret, buckets: buckets, objects: objectStore, uploads: uploadStore, s3: s3, log: log}
+func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, s3Endpoint, s3Region, jwtSecret string, buckets *bucket.Store, objectStore *objects.Store, uploadStore *uploads.Store, s3 *storage.Client, log *audit.Logger, q *quota.Checker) *Handler {
+	return &Handler{store: store, protect: protect, ac: ac, s3End: s3Endpoint, s3Reg: s3Region, secret: jwtSecret, buckets: buckets, objects: objectStore, uploads: uploadStore, s3: s3, log: log, quota: q}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {

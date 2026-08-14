@@ -70,6 +70,21 @@ func (s *Store) Finish(ctx context.Context, id int64, status string, at time.Tim
 	return err
 }
 
+func (s *Store) CompletedBytesSince(ctx context.Context, accountID int64, since time.Time) (int64, error) {
+	var n int64
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(t.size), 0)
+		FROM upload_tasks t
+		JOIN tenant_users u ON u.id = t.user_id
+		WHERE COALESCE(u.account_id, u.id) = $1
+		  AND t.status = $2
+		  AND t.completed_at >= $3`, accountID, StatusDone, since).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("daily upload bytes: %w", err)
+	}
+	return n, nil
+}
+
 // StaleMultipart returns pending multipart tasks past age or expired_at.
 func (s *Store) StaleMultipart(ctx context.Context, staleDays int) ([]Task, error) {
 	rows, err := s.pool.Query(ctx, `

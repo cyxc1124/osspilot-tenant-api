@@ -10,6 +10,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/quota"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
@@ -22,10 +23,11 @@ type Handler struct {
 	protect func(auth.UserHandler) http.HandlerFunc
 	ac      *rbac.Checker
 	log     *audit.Logger
+	quota   *quota.Checker
 }
 
-func NewHandler(s3 *storage.Client, buckets *bucket.Store, objects *objects.Store, tasks *Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger) *Handler {
-	return &Handler{s3: s3, buckets: buckets, objects: objects, tasks: tasks, protect: protect, ac: ac, log: log}
+func NewHandler(s3 *storage.Client, buckets *bucket.Store, objects *objects.Store, tasks *Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger, q *quota.Checker) *Handler {
+	return &Handler{s3: s3, buckets: buckets, objects: objects, tasks: tasks, protect: protect, ac: ac, log: log, quota: q}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -285,6 +287,10 @@ func (h *Handler) prepare(w http.ResponseWriter, r *http.Request, user *auth.Use
 	}
 	b, ok := h.see(w, r, user, bucketName, key)
 	if !ok {
+		return nil, "", false
+	}
+	if err := h.quota.Upload(r.Context(), auth.AccountID(user), b, key, size); err != nil {
+		quota.Reject(w, err)
 		return nil, "", false
 	}
 	ct := ""
