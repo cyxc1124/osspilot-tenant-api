@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -158,6 +159,19 @@ func main() {
 		Endpoint: cfg.S3Endpoint, AccessKey: cfg.RGWAccessKey, SecretKey: cfg.RGWSecretKey, Region: cfg.S3Region,
 		DownloadCDNURL: cfg.DownloadCDNURL, PreviewCDNURL: cfg.PreviewCDNURL,
 	}
+	if !s3cfg.Ready() && settingsStore != nil {
+		if rows, err := settingsStore.Map(context.Background()); err == nil {
+			if v := strings.TrimSpace(rows["s3_endpoint"]); v != "" {
+				s3cfg.Endpoint = v
+			}
+			if v := strings.TrimSpace(rows["rgw_access_key"]); v != "" {
+				s3cfg.AccessKey = v
+			}
+			if v := strings.TrimSpace(rows["rgw_secret_key"]); v != "" {
+				s3cfg.SecretKey = v
+			}
+		}
+	}
 	var s3c *storage.Client
 	if s3cfg.Ready() {
 		s3c = storage.New(s3cfg)
@@ -185,7 +199,7 @@ func main() {
 		PreviewCDNURL:     cfg.PreviewCDNURL,
 		ObjectHTTPDomain:  cfg.ObjectHTTPDomain,
 		ObjectHTTPSDomain: cfg.ObjectHTTPSDomain,
-	}, cfg.ProjectionSecret)
+	}, cfg.ProjectionSecret, q)
 	projectH := project.NewHandler(cfg.ProjectionSecret, authStore, bucketStore, credsStore, q)
 	versionH := versions.NewHandler(versionStore, bucketStore, s3c, authH.RequireUser, ac)
 	shareH := share.NewHandler(shareStore, bucketStore, s3c, authH.RequireUser, ac, auditLog)

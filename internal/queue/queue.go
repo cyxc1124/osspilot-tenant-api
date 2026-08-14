@@ -12,6 +12,7 @@ import (
 )
 
 const (
+	TaskInventory       = "objects:inventory"
 	TaskInventoryBucket = "objects:inventory_bucket"
 	TaskBatchDelete     = "objects:batch_delete"
 	TaskBatchCopy       = "objects:batch_copy"
@@ -75,6 +76,18 @@ func (c *Client) Close() error {
 		return nil
 	}
 	return c.asynq.Close()
+}
+
+func (c *Client) EnqueueAllInventory(ctx context.Context) (string, error) {
+	if c == nil || c.asynq == nil {
+		return "", ErrUnavailable
+	}
+	info, err := c.asynq.EnqueueContext(ctx, asynq.NewTask(TaskInventory, nil),
+		asynq.MaxRetry(3), asynq.Timeout(time.Hour), asynq.Queue("default"))
+	if err != nil {
+		return "", err
+	}
+	return info.ID, nil
 }
 
 func (c *Client) EnqueueInventory(ctx context.Context, bucketName string) (string, error) {

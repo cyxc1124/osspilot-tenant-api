@@ -2,6 +2,7 @@ package platform
 
 import (
 	"crypto/subtle"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -27,6 +28,8 @@ var projectable = map[string]struct{}{
 	"storage_region_code":       {},
 	"storage_region_name":       {},
 	"s3_endpoint":               {},
+	"rgw_access_key":            {},
+	"rgw_secret_key":            {},
 }
 
 func (h *Handler) registerInternal(mux *http.ServeMux) {
@@ -63,6 +66,9 @@ func (h *Handler) putInternal(w http.ResponseWriter, r *http.Request) {
 	if n == 0 {
 		httpx.Error(w, http.StatusBadRequest, "No projectable fields")
 		return
+	}
+	if _, err := h.q.EnqueueAllInventory(r.Context()); err != nil {
+		slog.Warn("enqueue inventory after settings", "err", err)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

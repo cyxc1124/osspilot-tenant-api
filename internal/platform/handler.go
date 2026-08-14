@@ -5,6 +5,7 @@ import (
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/queue"
 )
 
 type Fallbacks struct {
@@ -39,10 +40,11 @@ type Handler struct {
 	fallbacks Fallbacks
 	protect   func(auth.UserHandler) http.HandlerFunc
 	secret    string
+	q         *queue.Client
 }
 
-func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, fallbacks Fallbacks, projectionSecret string) *Handler {
-	return &Handler{store: store, protect: protect, fallbacks: fallbacks, secret: projectionSecret}
+func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, fallbacks Fallbacks, projectionSecret string, q *queue.Client) *Handler {
+	return &Handler{store: store, protect: protect, fallbacks: fallbacks, secret: projectionSecret, q: q}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
