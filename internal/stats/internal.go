@@ -51,6 +51,7 @@ func (h *InternalHandler) usageHandler(w http.ResponseWriter, r *http.Request) {
 		items = append(items, map[string]any{
 			"bucket_name": b.BucketName, "used_bytes": b.UsedBytes, "object_count": b.ObjectCount,
 			"trash_bytes": b.TrashBytes, "trash_object_count": b.TrashCount,
+			"collected_at": rfc3339(b.CollectedAt),
 		})
 	}
 	classes, collected, err := h.usage.ByStorageClass(r.Context())

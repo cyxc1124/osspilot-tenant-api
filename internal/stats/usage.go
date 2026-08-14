@@ -23,6 +23,7 @@ type BucketUsage struct {
 	ObjectCount int64
 	TrashBytes  int64
 	TrashCount  int64
+	CollectedAt *time.Time
 }
 
 type StorageClassUsage struct {
@@ -59,13 +60,16 @@ func (s *UsageStore) Totals(ctx context.Context) (UsageTotals, error) {
 
 func (s *UsageStore) ByBucket(ctx context.Context) ([]BucketUsage, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT bucket_name,
-			COALESCE(SUM(size) FILTER (WHERE object_key NOT LIKE '.trash/%' AND object_key <> '.trash/' AND object_key NOT LIKE '.versions/%' AND object_key <> '.versions/'), 0),
-			COUNT(*) FILTER (WHERE object_key NOT LIKE '.trash/%' AND object_key <> '.trash/' AND object_key NOT LIKE '.versions/%' AND object_key <> '.versions/'),
-			COALESCE(SUM(size) FILTER (WHERE object_key LIKE '.trash/%' OR object_key = '.trash/'), 0),
-			COUNT(*) FILTER (WHERE object_key LIKE '.trash/%' OR object_key = '.trash/')
-		FROM object_records
-		GROUP BY bucket_name
+		SELECT b.bucket_name,
+			COALESCE(SUM(r.size) FILTER (WHERE r.object_key NOT LIKE '.trash/%' AND r.object_key <> '.trash/' AND r.object_key NOT LIKE '.versions/%' AND r.object_key <> '.versions/'), 0),
+			COUNT(*) FILTER (WHERE r.object_key NOT LIKE '.trash/%' AND r.object_key <> '.trash/' AND r.object_key NOT LIKE '.versions/%' AND r.object_key <> '.versions/'),
+			COALESCE(SUM(r.size) FILTER (WHERE r.object_key LIKE '.trash/%' OR r.object_key = '.trash/'), 0),
+			COUNT(*) FILTER (WHERE r.object_key LIKE '.trash/%' OR r.object_key = '.trash/'),
+			b.inventoried_at
+		FROM buckets b
+		LEFT JOIN object_records r ON r.bucket_id = b.id
+		WHERE b.status = 'active' AND (b.inventoried_at IS NOT NULL OR r.bucket_id IS NOT NULL)
+		GROUP BY b.bucket_name, b.inventoried_at
 		ORDER BY 2 DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("usage by bucket: %w", err)
@@ -74,7 +78,7 @@ func (s *UsageStore) ByBucket(ctx context.Context) ([]BucketUsage, error) {
 	var out []BucketUsage
 	for rows.Next() {
 		var b BucketUsage
-		if err := rows.Scan(&b.BucketName, &b.UsedBytes, &b.ObjectCount, &b.TrashBytes, &b.TrashCount); err != nil {
+		if err := rows.Scan(&b.BucketName, &b.UsedBytes, &b.ObjectCount, &b.TrashBytes, &b.TrashCount, &b.CollectedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, b)
