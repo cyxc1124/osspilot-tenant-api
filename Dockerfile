@@ -1,4 +1,4 @@
-# osspilot-tenant-api — migrate / api / worker 同一镜像
+# osspilot-tenant-api — migrate / api 同一镜像
 FROM golang:1.26-alpine AS builder
 
 WORKDIR /src
@@ -9,8 +9,7 @@ RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api \
- && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate \
- && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/worker ./cmd/worker
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
 
 FROM alpine:3.22 AS runtime
 
@@ -21,7 +20,7 @@ RUN apk add --no-cache ca-certificates tzdata \
  && adduser -D -H -u 10001 app
 
 WORKDIR /app
-COPY --from=builder /out/api /out/migrate /out/worker /app/
+COPY --from=builder /out/api /out/migrate /app/
 COPY --chmod=755 deploy/docker-entrypoint.sh /docker-entrypoint.sh
 
 LABEL org.opencontainers.image.source=https://github.com/cyxc1124/osspilot-tenant-api

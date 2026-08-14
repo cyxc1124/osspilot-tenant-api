@@ -7,6 +7,5 @@ fi
 case "$cmd" in
   api) exec /app/api "$@" ;;
   migrate) exec /app/migrate "$@" ;;
-  worker) exec /app/worker "$@" ;;
   *) exec "$cmd" "$@" ;;
 esac
