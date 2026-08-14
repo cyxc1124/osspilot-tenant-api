@@ -297,6 +297,7 @@ func (o *openAPI) presignDownload(w http.ResponseWriter, r *http.Request, p Prin
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
+	o.h.log.RecordMeta(r.Context(), p.ActingUserID, p.AccountID, b.BucketName, req.ObjectKey, "download", "success", "", "", "")
 	httpx.JSON(w, http.StatusOK, map[string]any{"download_url": url, "expires_in": expires})
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/queue"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/stats"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/uploads"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/versions"
@@ -61,6 +62,7 @@ func main() {
 		Versions: versions.NewStore(pool),
 		Uploads:  uploads.NewStore(pool),
 		Settings: platform.NewStore(pool),
+		Stats:    stats.NewStore(pool),
 		S3:       storage.New(s3cfg),
 		Log:      audit.NewLogger(pool),
 	}
@@ -74,6 +76,7 @@ func main() {
 	mux.HandleFunc(queue.TaskBatchDelete, jobs.BatchDelete)
 	mux.HandleFunc(queue.TaskBatchCopy, jobs.BatchCopy)
 	mux.HandleFunc(queue.TaskBatchMove, jobs.BatchMove)
+	mux.HandleFunc(worker.TaskRequestStats, jobs.RequestStats)
 
 	srv := asynq.NewServer(redisOpt, asynq.Config{Concurrency: 2})
 	scheduler := asynq.NewScheduler(redisOpt, nil)
@@ -93,6 +96,10 @@ func main() {
 		slog.Error("schedule multipart", "err", err)
 		os.Exit(1)
 	}
+	if _, err := scheduler.Register("@every 1h", asynq.NewTask(worker.TaskRequestStats, nil)); err != nil {
+		slog.Error("schedule request stats", "err", err)
+		os.Exit(1)
+	}
 
 	go func() {
 		if err := scheduler.Run(); err != nil {
@@ -105,6 +112,9 @@ func main() {
 	defer client.Close()
 	if _, err := client.Enqueue(asynq.NewTask(worker.TaskInventory, nil), asynq.MaxRetry(3), asynq.Timeout(time.Hour)); err != nil {
 		slog.Warn("enqueue startup inventory", "err", err)
+	}
+	if _, err := client.Enqueue(asynq.NewTask(worker.TaskRequestStats, nil), asynq.MaxRetry(3), asynq.Timeout(10*time.Minute)); err != nil {
+		slog.Warn("enqueue startup request stats", "err", err)
 	}
 
 	slog.Info("worker listen")

@@ -15,6 +15,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/queue"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/stats"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/uploads"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/versions"
@@ -26,6 +27,7 @@ const (
 	TaskTrash           = "objects:trash"
 	TaskVersions        = "objects:versions"
 	TaskMultipart       = "objects:multipart"
+	TaskRequestStats    = "stats:requests"
 )
 
 type Jobs struct {
@@ -34,6 +36,7 @@ type Jobs struct {
 	Versions *versions.Store
 	Uploads  *uploads.Store
 	Settings *platform.Store
+	Stats    *stats.Store
 	S3       *storage.Client
 	Log      *audit.Logger
 }
@@ -194,5 +197,19 @@ func (j *Jobs) CleanMultipart(ctx context.Context, _ *asynq.Task) error {
 		aborted++
 	}
 	slog.Info("multipart cleanup done", "aborted", aborted)
+	return nil
+}
+
+func (j *Jobs) RequestStats(ctx context.Context, _ *asynq.Task) error {
+	if j.Stats == nil {
+		return nil
+	}
+	res, err := j.Stats.AggregateRequests(ctx, time.Now())
+	if err != nil {
+		return err
+	}
+	slog.Info("request stats done",
+		"periods", res.Periods, "accounts", res.Accounts, "buckets", res.Buckets,
+		"users", res.Users, "prefixes", res.Prefixes, "daily", res.Daily)
 	return nil
 }

@@ -2,6 +2,7 @@ package stats
 
 import (
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -163,12 +164,16 @@ func (h *Handler) traffic(w http.ResponseWriter, r *http.Request, user *auth.Use
 		httpx.Error(w, http.StatusBadRequest, "period must be 24h, 7d, or 30d")
 		return
 	}
-	// ponytail: no request_stats table; zeros until access logs land.
+	row, err := h.store.AccountTraffic(r.Context(), accountID, period)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
+	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"tenant_id": accountID, "period": period,
-		"upload_bytes": 0, "download_bytes": 0, "request_count": 0,
-		"get_count": 0, "put_count": 0, "delete_count": 0, "error_count": 0,
-		"active_users": 0, "collected_at": nil,
+		"upload_bytes": row.UploadBytes, "download_bytes": row.DownloadBytes, "request_count": row.RequestCount,
+		"get_count": row.GetCount, "put_count": row.PutCount, "delete_count": row.DeleteCount,
+		"error_count": row.ErrorCount, "active_users": row.ActiveUsers, "collected_at": rfc3339(row.CollectedAt),
 	})
 }
 
@@ -186,15 +191,29 @@ func (h *Handler) bucketRequests(w http.ResponseWriter, r *http.Request, user *a
 	if !ok {
 		return
 	}
+	byID, err := h.store.BucketTraffic(r.Context(), idsOf(items), period)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
+	}
 	out := make([]map[string]any, 0, len(items))
+	var collected *time.Time
 	for _, b := range items {
+		row := byID[b.ID]
+		if row.CollectedAt != nil && (collected == nil || row.CollectedAt.After(*collected)) {
+			collected = row.CollectedAt
+		}
 		out = append(out, map[string]any{
 			"bucket_id": b.ID, "bucket_name": b.BucketName, "display_name": b.DisplayName,
-			"display_alias_only": b.DisplayAliasOnly, "request_count": 0,
-			"upload_bytes": 0, "download_bytes": 0, "get_count": 0, "put_count": 0, "delete_count": 0,
+			"display_alias_only": b.DisplayAliasOnly, "request_count": row.RequestCount,
+			"upload_bytes": row.UploadBytes, "download_bytes": row.DownloadBytes,
+			"get_count": row.GetCount, "put_count": row.PutCount, "delete_count": row.DeleteCount,
 		})
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"tenant_id": accountID, "period": period, "items": out, "collected_at": nil})
+	sort.Slice(out, func(i, j int) bool {
+		return out[i]["request_count"].(int64) > out[j]["request_count"].(int64)
+	})
+	httpx.JSON(w, http.StatusOK, map[string]any{"tenant_id": accountID, "period": period, "items": out, "collected_at": rfc3339(collected)})
 }
 
 func (h *Handler) alerts(w http.ResponseWriter, r *http.Request, user *auth.User) {

@@ -178,7 +178,7 @@ func main() {
 	bucketH := bucket.NewHandler(bucketStore, authH.RequireUser, s3c, cfg.CORSOrigins, ac)
 	objectH := objects.NewHandler(bucketStore, objectStore, s3c, authH.RequireUser, ac, auditLog, q)
 	uploadH := uploads.NewHandler(s3c, bucketStore, objectStore, uploadStore, authH.RequireUser, ac, auditLog, qc)
-	downloadH := downloads.NewHandler(s3c, bucketStore, authH.RequireUser, ac)
+	downloadH := downloads.NewHandler(s3c, bucketStore, authH.RequireUser, ac, auditLog)
 	platformH := platform.NewHandler(settingsStore, authH.RequireUser, platform.Fallbacks{
 		S3Endpoint:        cfg.S3Endpoint,
 		DownloadCDNURL:    cfg.DownloadCDNURL,
@@ -197,7 +197,7 @@ func main() {
 	auditH := audit.NewHandler(auditStore, authH.RequireUser, ac)
 	var usageH *stats.InternalHandler
 	if pool != nil {
-		usageH = stats.NewInternalHandler(stats.NewUsageStore(pool), cfg.ProjectionSecret)
+		usageH = stats.NewInternalHandler(stats.NewUsageStore(pool), statsStore, cfg.ProjectionSecret)
 	}
 	previewH := preview.NewHandler(s3c, bucketStore, authH.RequireUser, ac, auditLog)
 	if cfg.ProjectionSecret == "" {

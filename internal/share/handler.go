@@ -309,6 +309,7 @@ func (h *Handler) access(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusForbidden, "Share link access limit reached")
 		return
 	}
+	h.log.RecordMeta(r.Context(), link.CreatedBy, link.AccountID, link.BucketName, link.ObjectKey, "share_access", "success", "", "", "")
 	expiresIn := int(ttl.Seconds())
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"bucket_name":      link.BucketName,

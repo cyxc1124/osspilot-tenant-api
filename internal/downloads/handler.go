@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/cyxc1124/osspilot-tenant-api/internal/audit"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
@@ -17,10 +18,11 @@ type Handler struct {
 	buckets *bucket.Store
 	protect func(auth.UserHandler) http.HandlerFunc
 	ac      *rbac.Checker
+	log     *audit.Logger
 }
 
-func NewHandler(s3 *storage.Client, buckets *bucket.Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker) *Handler {
-	return &Handler{s3: s3, buckets: buckets, protect: protect, ac: ac}
+func NewHandler(s3 *storage.Client, buckets *bucket.Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger) *Handler {
+	return &Handler{s3: s3, buckets: buckets, protect: protect, ac: ac, log: log}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -53,6 +55,7 @@ func (h *Handler) presign(w http.ResponseWriter, r *http.Request, user *auth.Use
 		h.writeErr(w, err)
 		return
 	}
+	h.log.Record(r, user, req.BucketName, req.ObjectKey, "download", "success", "")
 	httpx.JSON(w, http.StatusOK, map[string]any{"download_url": url, "expires_in": expires})
 }
 
@@ -88,6 +91,7 @@ func (h *Handler) batch(w http.ResponseWriter, r *http.Request, user *auth.User)
 			continue
 		}
 		expires = exp
+		h.log.Record(r, user, b.BucketName, key, "download", "success", "")
 		items = append(items, map[string]any{"key": key, "download_url": url, "error": nil})
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": items, "expires_in": expires})
