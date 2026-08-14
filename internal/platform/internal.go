@@ -23,10 +23,10 @@ var projectable = map[string]struct{}{
 	"version_cleanup_enabled":   {},
 	"multipart_stale_days":      {},
 	"multipart_cleanup_enabled": {},
-	"storage_region_id":          {},
-	"storage_region_code":        {},
-	"storage_region_name":        {},
-	"s3_endpoint":                {},
+	"storage_region_id":         {},
+	"storage_region_code":       {},
+	"storage_region_name":       {},
+	"s3_endpoint":               {},
 }
 
 func (h *Handler) registerInternal(mux *http.ServeMux) {
