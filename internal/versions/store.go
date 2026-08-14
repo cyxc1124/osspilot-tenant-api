@@ -77,6 +77,20 @@ func (s *Store) GetByID(ctx context.Context, id int64) (*Record, error) {
 	return &r, nil
 }
 
+func (s *Store) MaxNo(ctx context.Context, bucket, key string) (int, error) {
+	if s == nil || s.pool == nil {
+		return 1, nil
+	}
+	var n int
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(MAX(version_no), 1) FROM file_versions
+		WHERE bucket_name = $1 AND object_key = $2`, bucket, key).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("max version: %w", err)
+	}
+	return n, nil
+}
+
 func (s *Store) NextNo(ctx context.Context, bucket, key string) (int, error) {
 	var n int
 	err := s.pool.QueryRow(ctx, `

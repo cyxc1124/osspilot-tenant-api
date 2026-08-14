@@ -497,6 +497,18 @@ paths:
       responses:
         "200":
           description: saved
+  /api/text-edit/{session_id}/presign-save:
+    post:
+      summary: Archive current version and return a presigned PUT for direct save
+      responses:
+        "200":
+          description: upload_url
+  /api/text-edit/{session_id}/complete-save:
+    post:
+      summary: Confirm a presigned text save
+      responses:
+        "200":
+          description: saved
   /api/text-edit/unlock:
     post:
       summary: Release the text-edit lock

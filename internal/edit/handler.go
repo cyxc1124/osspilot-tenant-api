@@ -52,6 +52,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/file-locks/unlock", h.protect(h.lockRelease))
 	mux.HandleFunc("POST /api/text-edit/open", h.protect(h.textOpen))
 	mux.HandleFunc("POST /api/text-edit/{session_id}/save", h.protect(h.textSave))
+	mux.HandleFunc("POST /api/text-edit/{session_id}/presign-save", h.protect(h.textPresignSave))
+	mux.HandleFunc("POST /api/text-edit/{session_id}/complete-save", h.protect(h.textCompleteSave))
 	mux.HandleFunc("POST /api/text-edit/unlock", h.protect(h.textUnlock))
 	mux.HandleFunc("POST /api/text-edit/close", h.protect(h.textClose))
 	mux.HandleFunc("POST /api/editor/open", h.protect(h.officeOpen))

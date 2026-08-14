@@ -27,6 +27,17 @@ type textSaveReq struct {
 	Remark  *string `json:"remark"`
 }
 
+type textPresignSaveReq struct {
+	Size        int64   `json:"size"`
+	ContentType *string `json:"content_type"`
+	Remark      *string `json:"remark"`
+}
+
+type textCompleteSaveReq struct {
+	ETag   *string `json:"etag"`
+	Remark *string `json:"remark"`
+}
+
 type textCloseReq struct {
 	SessionID string `json:"session_id"`
 }
@@ -182,6 +193,110 @@ func (h *Handler) textSave(w http.ResponseWriter, r *http.Request, user *auth.Us
 		"version_no": n,
 		"etag":       etag,
 		"saved_at":   formatTime(time.Now()),
+	})
+}
+
+func (h *Handler) textPresignSave(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	if !h.requireStore(w) || !h.requireS3(w) {
+		return
+	}
+	sess := h.loadTextSession(w, r, user)
+	if sess == nil {
+		return
+	}
+	if sess.Mode == modeView {
+		httpx.Error(w, http.StatusForbidden, "Read-only preview cannot be saved")
+		return
+	}
+	if !h.requireSessionLock(w, r, sess) {
+		return
+	}
+	var req textPresignSaveReq
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if req.Size <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "size must be greater than 0")
+		return
+	}
+	if req.Size > maxTextBytes {
+		httpx.Error(w, http.StatusRequestEntityTooLarge, "File too large for text editing")
+		return
+	}
+	n, err := versions.Archive(r.Context(), h.s3, h.versions, user.ID, sess.Bucket, sess.Key, versions.SourceTextEdit, req.Remark)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			httpx.Error(w, http.StatusNotFound, "Object not found")
+			return
+		}
+		httpx.Error(w, http.StatusBadGateway, "storage error")
+		return
+	}
+	ct := ""
+	if req.ContentType != nil {
+		ct = strings.TrimSpace(*req.ContentType)
+	}
+	url, expires, err := h.s3.PresignPut(r.Context(), sess.Bucket, sess.Key, ct)
+	if err != nil {
+		httpx.Error(w, http.StatusBadGateway, "storage error")
+		return
+	}
+	headers := map[string]string{}
+	if ct != "" {
+		headers["Content-Type"] = ct
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"upload_url": url, "version_no": n, "expires_in": expires, "headers": headers,
+	})
+}
+
+func (h *Handler) textCompleteSave(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	if !h.requireStore(w) || !h.requireS3(w) {
+		return
+	}
+	sess := h.loadTextSession(w, r, user)
+	if sess == nil {
+		return
+	}
+	if sess.Mode == modeView {
+		httpx.Error(w, http.StatusForbidden, "Read-only preview cannot be saved")
+		return
+	}
+	if !h.requireSessionLock(w, r, sess) {
+		return
+	}
+	var req textCompleteSaveReq
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	meta, err := h.s3.HeadObject(r.Context(), sess.Bucket, sess.Key)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			httpx.Error(w, http.StatusNotFound, "Saved object not found")
+			return
+		}
+		httpx.Error(w, http.StatusBadGateway, "storage error")
+		return
+	}
+	etag := meta.ETag
+	if req.ETag != nil && strings.TrimSpace(*req.ETag) != "" {
+		s := strings.TrimSpace(*req.ETag)
+		etag = &s
+	}
+	n := 1
+	if h.versions != nil {
+		n, err = h.versions.MaxNo(r.Context(), sess.Bucket, sess.Key)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "database error")
+			return
+		}
+	}
+	now := time.Now().UTC()
+	_ = h.store.MarkSaved(r.Context(), sess.ID, etag, now)
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"saved": true, "version_no": n, "etag": etag, "saved_at": formatTime(now),
 	})
 }
 
