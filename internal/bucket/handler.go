@@ -193,6 +193,15 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 				return
 			}
 		}
+		if b.AccessLoggingEnabled {
+			if err := h.applyLogging(r.Context(), b); err != nil {
+				_ = h.s3.DeleteBucket(r.Context(), b.BucketName)
+				_ = h.store.Delete(r.Context(), b.ID)
+				httpx.Error(w, http.StatusBadGateway, "storage error")
+				return
+			}
+			_ = h.store.Update(r.Context(), b)
+		}
 	}
 	httpx.JSON(w, http.StatusCreated, toDetail(*b, Usage{}))
 }
@@ -231,6 +240,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, user *auth.User
 		b.ObjectLimit = req.ObjectLimit
 	}
 	prevVer := b.VersioningEnabled
+	prevLog, prevTarget, prevPrefix := b.AccessLoggingEnabled, b.AccessLogTargetBucket, b.AccessLogPrefix
 	if req.VersioningEnabled != nil {
 		b.VersioningEnabled = *req.VersioningEnabled
 	}
@@ -252,6 +262,13 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, user *auth.User
 			status = "Enabled"
 		}
 		if err := h.s3.PutBucketVersioning(r.Context(), b.BucketName, status); err != nil {
+			httpx.Error(w, http.StatusBadGateway, "storage error")
+			return
+		}
+	}
+	logChanged := b.AccessLoggingEnabled != prevLog || strPtr(b.AccessLogTargetBucket) != strPtr(prevTarget) || strPtr(b.AccessLogPrefix) != strPtr(prevPrefix)
+	if h.s3 != nil && logChanged {
+		if err := h.applyLogging(r.Context(), b); err != nil {
 			httpx.Error(w, http.StatusBadGateway, "storage error")
 			return
 		}
@@ -330,11 +347,35 @@ func (h *Handler) validateLogging(w http.ResponseWriter, r *http.Request, user *
 
 var errLogging = errors.New("logging")
 
+func defaultLogPrefix(bucket string) string { return "access-logs/" + bucket + "/" }
+
+func (h *Handler) applyLogging(ctx context.Context, b *Bucket) error {
+	if h.s3 == nil {
+		return nil
+	}
+	if !b.AccessLoggingEnabled {
+		b.AccessLogTargetBucket, b.AccessLogPrefix = nil, nil
+		return h.s3.PutBucketLogging(ctx, b.BucketName, false, nil, nil)
+	}
+	if b.AccessLogPrefix == nil || *b.AccessLogPrefix == "" {
+		p := defaultLogPrefix(b.BucketName)
+		b.AccessLogPrefix = &p
+	}
+	return h.s3.PutBucketLogging(ctx, b.BucketName, true, b.AccessLogTargetBucket, b.AccessLogPrefix)
+}
+
 func emptyToNil(s *string) *string {
 	if s == nil || *s == "" {
 		return nil
 	}
 	return s
+}
+
+func strPtr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func (h *Handler) detail(ctx context.Context, b Bucket) detail {

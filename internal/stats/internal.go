@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 )
@@ -22,6 +23,8 @@ func NewInternalHandler(usage *UsageStore, reqs *Store, secret string) *Internal
 func (h *InternalHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /internal/stats/usage", h.usageHandler)
 	mux.HandleFunc("GET /internal/stats/requests", h.requestsHandler)
+	mux.HandleFunc("PUT /internal/alerts/events", h.putAlert)
+	mux.HandleFunc("GET /internal/stats/audit-window", h.auditWindow)
 }
 
 func (h *InternalHandler) usageHandler(w http.ResponseWriter, r *http.Request) {
@@ -184,6 +187,106 @@ func (h *InternalHandler) requestsHandler(w http.ResponseWriter, r *http.Request
 		"buckets":  map[string]any{"items": bitems, "collected_at": bktCollected},
 		"prefixes": map[string]any{"items": pitems, "collected_at": preCollected},
 	})
+}
+
+func (h *InternalHandler) putAlert(w http.ResponseWriter, r *http.Request) {
+	if h.secret == "" || h.reqs == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "projection is not configured")
+		return
+	}
+	if !bearerOK(r.Header.Get("Authorization"), h.secret) {
+		httpx.Error(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	var req struct {
+		Username    string  `json:"username"`
+		Fingerprint string  `json:"fingerprint"`
+		RuleType    string  `json:"rule_type"`
+		Severity    string  `json:"severity"`
+		Status      string  `json:"status"`
+		Title       string  `json:"title"`
+		Message     string  `json:"message"`
+		BucketName  *string `json:"bucket_name"`
+		FiredAt     *string `json:"fired_at"`
+		Resolved    bool    `json:"resolved"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil || req.Fingerprint == "" || req.Username == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if req.Resolved || req.Status == "resolved" {
+		if err := h.reqs.ResolveAlert(r.Context(), req.Fingerprint); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "database error")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	u, err := h.reqs.AccountIDByUsername(r.Context(), req.Username)
+	if err != nil || u == 0 {
+		httpx.Error(w, http.StatusNotFound, "Account not found")
+		return
+	}
+	a := Alert{RuleType: req.RuleType, Severity: req.Severity, Status: "firing", Title: req.Title, Message: req.Message, BucketName: req.BucketName, Fingerprint: req.Fingerprint}
+	if req.Status != "" {
+		a.Status = req.Status
+	}
+	if req.FiredAt != nil {
+		if t, err := time.Parse(time.RFC3339, *req.FiredAt); err == nil {
+			a.FiredAt = t
+		}
+	}
+	if err := h.reqs.UpsertAlert(r.Context(), u, a); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *InternalHandler) auditWindow(w http.ResponseWriter, r *http.Request) {
+	if h.secret == "" || h.reqs == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "projection is not configured")
+		return
+	}
+	if !bearerOK(r.Header.Get("Authorization"), h.secret) {
+		httpx.Error(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	minutes := 60
+	if raw := r.URL.Query().Get("minutes"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 10080 {
+			httpx.Error(w, http.StatusBadRequest, "minutes must be 1-10080")
+			return
+		}
+		minutes = n
+	}
+	actions := splitCSV(r.URL.Query().Get("actions"))
+	if len(actions) == 0 {
+		httpx.Error(w, http.StatusBadRequest, "actions is required")
+		return
+	}
+	total, fail, err := h.reqs.AuditWindow(r.Context(), time.Now().Add(-time.Duration(minutes)*time.Minute), actions)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"total": total, "failures": fail})
+}
+
+func splitCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func bearerOK(header, secret string) bool {

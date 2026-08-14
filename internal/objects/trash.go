@@ -42,30 +42,26 @@ func (h *Handler) listTrash(w http.ResponseWriter, r *http.Request, user *auth.U
 	if maxKeys > maxListKeys {
 		maxKeys = maxListKeys
 	}
-	recs, err := h.store.ListTrash(r.Context(), b.ID, prefix, after, maxKeys+1)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "database error")
+	s3 := h.client(r.Context())
+	if s3 == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
 		return
 	}
-	truncated := len(recs) > maxKeys
-	if truncated {
-		recs = recs[:maxKeys]
+	items, token, truncated, s3Keys, err := ListTrashFromS3(r.Context(), s3, b.BucketName, prefix, after, maxKeys)
+	if err != nil {
+		httpx.Error(w, http.StatusBadGateway, "storage error")
+		return
 	}
-	items := make([]trashItem, 0, len(recs))
-	var token *string
-	for _, rec := range recs {
-		orig, ok := FromTrashKey(rec.Key)
-		if !ok {
-			continue
+	if meta, err := h.store.MetaByKeys(r.Context(), b.ID, s3Keys); err == nil {
+		now := time.Now()
+		for i, trashKey := range s3Keys {
+			if rec, ok := meta[trashKey]; ok && i < len(items) {
+				items[i].ContentType = rec.ContentType
+			}
+			if i < len(items) {
+				_ = h.store.UpsertSeen(r.Context(), b.ID, b.BucketName, trashKey, items[i].Size, nil, nil, now)
+			}
 		}
-		items = append(items, trashItem{
-			Key: orig, Size: rec.Size, ContentType: rec.ContentType, LastModified: rec.LastModified,
-		})
-		k := rec.Key
-		token = &k
-	}
-	if !truncated {
-		token = nil
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"items":              items,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -63,6 +64,13 @@ func (s *Store) GetAccess(ctx context.Context, accountID int64) (*AccessRow, err
 
 func (s *Store) GetAccessByUsername(ctx context.Context, username string) (*AccessRow, error) {
 	return s.scanAccess(s.pool.QueryRow(ctx, accessSelect+` WHERE u.username = $1`, username))
+}
+
+func (s *Store) GetAccessByRGWUID(ctx context.Context, uid string) (*AccessRow, error) {
+	if strings.TrimSpace(uid) == "" {
+		return nil, nil
+	}
+	return s.scanAccess(s.pool.QueryRow(ctx, accessSelect+` WHERE a.rgw_uid = $1 AND a.status = 'approved'`, uid))
 }
 
 func (s *Store) ListAccess(ctx context.Context, status string) ([]AccessRow, error) {

@@ -88,6 +88,44 @@ func (s *Store) Exists(ctx context.Context, bucketID int64, key string) (bool, e
 	return true, nil
 }
 
+func (s *Store) MetaByKeys(ctx context.Context, bucketID int64, keys []string) (map[string]record, error) {
+	out := map[string]record{}
+	if s == nil || s.pool == nil || len(keys) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT object_key, content_type, created_by
+		FROM object_records WHERE bucket_id = $1 AND object_key = ANY($2)`, bucketID, keys)
+	if err != nil {
+		return nil, fmt.Errorf("object meta: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rec record
+		if err := rows.Scan(&rec.Key, &rec.ContentType, &rec.UploadedBy); err != nil {
+			return nil, err
+		}
+		out[rec.Key] = rec
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) PatchHead(ctx context.Context, bucketID int64, key string, contentType, storageClass *string) error {
+	if s == nil || s.pool == nil {
+		return nil
+	}
+	_, err := s.pool.Exec(ctx, `
+		UPDATE object_records SET
+			content_type = COALESCE($3, content_type),
+			storage_class = COALESCE($4, storage_class),
+			updated_at = now()
+		WHERE bucket_id = $1 AND object_key = $2`, bucketID, key, contentType, storageClass)
+	if err != nil {
+		return fmt.Errorf("patch object head: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) Get(ctx context.Context, bucketID int64, key string) (*record, error) {
 	var rec record
 	var last, created, updated time.Time

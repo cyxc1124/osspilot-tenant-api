@@ -35,6 +35,42 @@ func (c Config) Ready() bool {
 	return c.Endpoint != "" && c.AccessKey != "" && c.SecretKey != ""
 }
 
+func Overlay(cfg Config, rows map[string]string) Config {
+	if v := strings.TrimSpace(rows["s3_endpoint"]); v != "" {
+		cfg.Endpoint = v
+	}
+	if v := strings.TrimSpace(rows["rgw_access_key"]); v != "" {
+		cfg.AccessKey = v
+	}
+	if v := strings.TrimSpace(rows["rgw_secret_key"]); v != "" {
+		cfg.SecretKey = v
+	}
+	if v := strings.TrimSpace(rows["download_cdn_url"]); v != "" {
+		cfg.DownloadCDNURL = v
+	}
+	if v := strings.TrimSpace(rows["preview_cdn_url"]); v != "" {
+		cfg.PreviewCDNURL = v
+	}
+	return cfg
+}
+
+type SettingsMap interface {
+	Map(ctx context.Context) (map[string]string, error)
+}
+
+func Live(ctx context.Context, fb Config, settings SettingsMap, fallback *Client) *Client {
+	cfg := fb
+	if settings != nil {
+		if rows, err := settings.Map(ctx); err == nil {
+			cfg = Overlay(cfg, rows)
+		}
+	}
+	if cfg.Ready() {
+		return New(cfg)
+	}
+	return fallback
+}
+
 type Client struct {
 	s3             *s3.Client
 	presign        *s3.PresignClient
@@ -45,9 +81,13 @@ type Client struct {
 }
 
 type ObjectMeta struct {
-	Size        int64
-	ETag        *string
-	ContentType *string
+	Size                 int64
+	ETag                 *string
+	ContentType          *string
+	LastModified         *string
+	StorageClass         *string
+	ServerSideEncryption *string
+	UserMetadata         map[string]string
 }
 
 type CompletedPart struct {
@@ -121,9 +161,24 @@ func (c *Client) HeadObject(ctx context.Context, bucket, key string) (ObjectMeta
 		}
 		return ObjectMeta{}, err
 	}
-	meta := ObjectMeta{ContentType: out.ContentType, ETag: stripETag(out.ETag)}
+	meta := ObjectMeta{ContentType: out.ContentType, ETag: stripETag(out.ETag), UserMetadata: map[string]string{}}
 	if out.ContentLength != nil {
 		meta.Size = *out.ContentLength
+	}
+	if out.LastModified != nil {
+		s := out.LastModified.UTC().Format(time.RFC3339)
+		meta.LastModified = &s
+	}
+	if out.StorageClass != "" {
+		sc := string(out.StorageClass)
+		meta.StorageClass = &sc
+	}
+	if out.ServerSideEncryption != "" {
+		sse := string(out.ServerSideEncryption)
+		meta.ServerSideEncryption = &sse
+	}
+	for k, v := range out.Metadata {
+		meta.UserMetadata[k] = v
 	}
 	return meta, nil
 }
@@ -179,6 +234,18 @@ func (c *Client) PresignGet(ctx context.Context, bucket, key string) (string, in
 }
 
 func (c *Client) PresignGetFor(ctx context.Context, bucket, key string, ttl time.Duration) (string, int, error) {
+	return c.presignGetCDN(ctx, bucket, key, ttl, c.downloadCDNURL)
+}
+
+func (c *Client) PresignPreview(ctx context.Context, bucket, key string) (string, int, error) {
+	return c.PresignPreviewFor(ctx, bucket, key, c.downloadTTL)
+}
+
+func (c *Client) PresignPreviewFor(ctx context.Context, bucket, key string, ttl time.Duration) (string, int, error) {
+	return c.presignGetCDN(ctx, bucket, key, ttl, c.previewCDNURL)
+}
+
+func (c *Client) presignGetCDN(ctx context.Context, bucket, key string, ttl time.Duration, cdn string) (string, int, error) {
 	if ttl < time.Second {
 		return "", 0, errors.New("expired")
 	}
@@ -188,7 +255,7 @@ func (c *Client) PresignGetFor(ctx context.Context, bucket, key string, ttl time
 	if err != nil {
 		return "", 0, err
 	}
-	return rewriteCDN(out.URL, c.downloadCDNURL), int(ttl.Seconds()), nil
+	return rewriteCDN(out.URL, cdn), int(ttl.Seconds()), nil
 }
 
 func (c *Client) PresignUploadPart(ctx context.Context, bucket, key, uploadID string, part int32) (string, error) {
@@ -353,19 +420,58 @@ type ListedObject struct {
 	Size         int64
 	ETag         *string
 	StorageClass *string
+	LastModified *string
 }
 
 type ListPage struct {
 	Objects   []ListedObject
+	Prefixes  []string
 	Truncated bool
 	Token     string
 }
 
 func (c *Client) ListObjects(ctx context.Context, bucket, token string, maxKeys int32) (ListPage, error) {
+	return c.list(ctx, bucket, "", token, maxKeys, false)
+}
+
+func (c *Client) ListPrefix(ctx context.Context, bucket, prefix, token string, maxKeys int32) (ListPage, error) {
+	return c.list(ctx, bucket, prefix, token, maxKeys, true)
+}
+
+func (c *Client) ListPrefixFlat(ctx context.Context, bucket, prefix, token string, maxKeys int32) (ListPage, error) {
+	return c.list(ctx, bucket, prefix, token, maxKeys, false)
+}
+
+func (c *Client) PutBucketLogging(ctx context.Context, bucket string, enabled bool, target, prefix *string) error {
+	in := &s3.PutBucketLoggingInput{
+		Bucket:              aws.String(bucket),
+		BucketLoggingStatus: &types.BucketLoggingStatus{},
+	}
+	if enabled {
+		if target == nil || strings.TrimSpace(*target) == "" {
+			return errors.New("target_bucket is required when access logging is enabled")
+		}
+		le := &types.LoggingEnabled{TargetBucket: aws.String(strings.TrimSpace(*target))}
+		if prefix != nil {
+			le.TargetPrefix = aws.String(*prefix)
+		}
+		in.BucketLoggingStatus.LoggingEnabled = le
+	}
+	_, err := c.s3.PutBucketLogging(ctx, in)
+	return err
+}
+
+func (c *Client) list(ctx context.Context, bucket, prefix, token string, maxKeys int32, delimited bool) (ListPage, error) {
 	if maxKeys < 1 {
 		maxKeys = 1000
 	}
 	in := &s3.ListObjectsV2Input{Bucket: aws.String(bucket), MaxKeys: aws.Int32(maxKeys)}
+	if prefix != "" {
+		in.Prefix = aws.String(prefix)
+	}
+	if delimited {
+		in.Delimiter = aws.String("/")
+	}
 	if token != "" {
 		in.ContinuationToken = aws.String(token)
 	}
@@ -377,14 +483,23 @@ func (c *Client) ListObjects(ctx context.Context, bucket, token string, maxKeys 
 	if out.NextContinuationToken != nil {
 		page.Token = *out.NextContinuationToken
 	}
+	for _, p := range out.CommonPrefixes {
+		if p.Prefix != nil && *p.Prefix != "" {
+			page.Prefixes = append(page.Prefixes, *p.Prefix)
+		}
+	}
 	for _, obj := range out.Contents {
-		item := ListedObject{Size: aws.ToInt64(obj.Size), ETag: stripETag(obj.ETag), StorageClass: (*string)(nil)}
+		item := ListedObject{Size: aws.ToInt64(obj.Size), ETag: stripETag(obj.ETag)}
 		if obj.Key != nil {
 			item.Key = *obj.Key
 		}
 		if obj.StorageClass != "" {
 			sc := string(obj.StorageClass)
 			item.StorageClass = &sc
+		}
+		if obj.LastModified != nil {
+			s := obj.LastModified.UTC().Format(time.RFC3339)
+			item.LastModified = &s
 		}
 		page.Objects = append(page.Objects, item)
 	}

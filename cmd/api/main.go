@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -159,17 +158,9 @@ func main() {
 		Endpoint: cfg.S3Endpoint, AccessKey: cfg.RGWAccessKey, SecretKey: cfg.RGWSecretKey, Region: cfg.S3Region,
 		DownloadCDNURL: cfg.DownloadCDNURL, PreviewCDNURL: cfg.PreviewCDNURL,
 	}
-	if !s3cfg.Ready() && settingsStore != nil {
+	if settingsStore != nil {
 		if rows, err := settingsStore.Map(context.Background()); err == nil {
-			if v := strings.TrimSpace(rows["s3_endpoint"]); v != "" {
-				s3cfg.Endpoint = v
-			}
-			if v := strings.TrimSpace(rows["rgw_access_key"]); v != "" {
-				s3cfg.AccessKey = v
-			}
-			if v := strings.TrimSpace(rows["rgw_secret_key"]); v != "" {
-				s3cfg.SecretKey = v
-			}
+			s3cfg = storage.Overlay(s3cfg, rows)
 		}
 	}
 	var s3c *storage.Client
@@ -190,7 +181,7 @@ func main() {
 	}
 	qc := quota.New(authStore, bucketStore, objectStore, uploadStore)
 	bucketH := bucket.NewHandler(bucketStore, authH.RequireUser, s3c, cfg.CORSOrigins, ac)
-	objectH := objects.NewHandler(bucketStore, objectStore, s3c, authH.RequireUser, ac, auditLog, q)
+	objectH := objects.NewHandler(bucketStore, objectStore, s3c, authH.RequireUser, ac, auditLog, q, settingsStore, s3cfg)
 	uploadH := uploads.NewHandler(s3c, bucketStore, objectStore, uploadStore, authH.RequireUser, ac, auditLog, qc)
 	downloadH := downloads.NewHandler(s3c, bucketStore, authH.RequireUser, ac, auditLog)
 	platformH := platform.NewHandler(settingsStore, authH.RequireUser, platform.Fallbacks{

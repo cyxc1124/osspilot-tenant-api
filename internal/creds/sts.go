@@ -2,6 +2,7 @@ package creds
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
 const (
@@ -32,6 +34,76 @@ type stsReq struct {
 	SecretAccessKey string `json:"secret_access_key"`
 	DurationSeconds int    `json:"duration_seconds"`
 	TenantID        *int64 `json:"tenant_id"`
+}
+
+func (h *Handler) authSTS(r *http.Request, parsed parsedAuth) (Principal, error) {
+	if claims, err := parseSTS(h.secret, parsed.Session); err == nil {
+		key, err := h.store.GetKeyByAccessID(r.Context(), claims.AccessKeyID)
+		if err != nil {
+			return Principal{}, statusError{http.StatusInternalServerError, "database error"}
+		}
+		if key == nil || key.AccountID != claims.AccountID {
+			return Principal{}, statusError{http.StatusUnauthorized, "Invalid STS session credentials"}
+		}
+		return h.principalFromKey(r, key, "sts_session")
+	}
+	if h.s3End == "" || parsed.Session == "" {
+		return Principal{}, statusError{http.StatusUnauthorized, "Invalid STS session credentials"}
+	}
+	uid, err := storage.CallerAccount(r.Context(), h.s3End, h.s3Reg, parsed.KeyID, parsed.Secret, parsed.Session)
+	if err != nil {
+		return Principal{}, statusError{http.StatusUnauthorized, "Invalid STS session credentials"}
+	}
+	access, err := h.store.GetAccessByRGWUID(r.Context(), uid)
+	if err != nil {
+		return Principal{}, statusError{http.StatusInternalServerError, "database error"}
+	}
+	if access == nil || access.Status != "approved" {
+		return Principal{}, statusError{http.StatusForbidden, "STS session tenant is not approved for API access"}
+	}
+	apps, err := h.store.ListApps(r.Context(), access.AccountID)
+	if err != nil {
+		return Principal{}, statusError{http.StatusInternalServerError, "database error"}
+	}
+	var app *App
+	for i := range apps {
+		if apps[i].Status == "active" {
+			app = &apps[i]
+			break
+		}
+	}
+	if app == nil {
+		return Principal{}, statusError{http.StatusForbidden, "STS session cannot be attributed to a tenant application"}
+	}
+	return Principal{
+		AccountID: access.AccountID, ApplicationID: app.ID, ActingUserID: app.CreatedBy,
+		AccessKeyID: parsed.KeyID, AuthType: "sts_session",
+	}, nil
+}
+
+func (h *Handler) principalFromKey(r *http.Request, key *Key, authType string) (Principal, error) {
+	if key.Status != "active" {
+		return Principal{}, statusError{http.StatusForbidden, "Access key is disabled"}
+	}
+	app, err := h.store.GetApp(r.Context(), key.AccountID, key.ApplicationID)
+	if err != nil || app == nil {
+		return Principal{}, statusError{http.StatusInternalServerError, "database error"}
+	}
+	if app.Status != "active" {
+		return Principal{}, statusError{http.StatusForbidden, "Application is disabled"}
+	}
+	access, err := h.store.GetAccess(r.Context(), key.AccountID)
+	if err != nil {
+		return Principal{}, statusError{http.StatusInternalServerError, "database error"}
+	}
+	if access == nil || access.Status != "approved" {
+		return Principal{}, statusError{http.StatusForbidden, "Tenant API access is not approved"}
+	}
+	_ = h.store.TouchKey(r.Context(), key.ID)
+	return Principal{
+		AccountID: key.AccountID, ApplicationID: key.ApplicationID, ActingUserID: app.CreatedBy,
+		AccessKeyID: key.AccessKeyID, AuthType: authType,
+	}, nil
 }
 
 func clampSTS(n int) int {
@@ -89,15 +161,30 @@ func (h *Handler) issueSTS(w http.ResponseWriter, r *http.Request, user *auth.Us
 		httpx.Error(w, http.StatusForbidden, "Application is disabled")
 		return
 	}
-	exp := time.Now().Add(time.Duration(dur) * time.Second)
-	token, err := signSTS(h.secret, key, exp)
-	if err != nil {
+	out := h.issueToken(r, key, req.SecretAccessKey, dur)
+	if out == nil {
 		httpx.Error(w, http.StatusInternalServerError, "token error")
 		return
 	}
 	_ = h.store.TouchKey(r.Context(), key.ID)
 	h.log.Record(r, user, "", key.AccessKeyID, "issue_sts_credentials", "success", "")
-	httpx.JSON(w, http.StatusOK, stsJSON(key.AccessKeyID, req.SecretAccessKey, token, exp, dur, h.s3End, h.s3Reg))
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) issueToken(r *http.Request, key *Key, secret string, dur int) map[string]any {
+	if h.s3End != "" {
+		creds, err := storage.SessionToken(r.Context(), h.s3End, h.s3Reg, key.AccessKeyID, secret, int32(dur))
+		if err == nil {
+			return stsJSON(creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken, creds.Expiration, dur, h.s3End, h.s3Reg)
+		}
+		slog.Warn("rgw sts unavailable, jwt fallback", "err", err)
+	}
+	exp := time.Now().Add(time.Duration(dur) * time.Second)
+	token, err := signSTS(h.secret, key, exp)
+	if err != nil {
+		return nil
+	}
+	return stsJSON(key.AccessKeyID, secret, token, exp, dur, h.s3End, h.s3Reg)
 }
 
 func signSTS(secret string, key *Key, exp time.Time) (string, error) {

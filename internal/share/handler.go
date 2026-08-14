@@ -292,14 +292,13 @@ func (h *Handler) access(w http.ResponseWriter, r *http.Request) {
 		downloadURL = &url
 	}
 	if link.AllowPreview {
-		url, _, err := h.s3.PresignGetFor(r.Context(), link.BucketName, link.ObjectKey, ttl)
+		url, _, err := h.s3.PresignPreviewFor(r.Context(), link.BucketName, link.ObjectKey, ttl)
 		if err != nil {
 			httpx.Error(w, http.StatusBadGateway, "storage error")
 			return
 		}
 		previewURL = &url
 	}
-	// ponytail: skip CDN host rewrite (same as T4 downloads); platform_settings CDN is T5 read-only for now.
 	count, ok, err := h.store.BumpAccess(r.Context(), link.ID, now)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")

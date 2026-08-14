@@ -2,6 +2,7 @@ package objects
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -12,23 +13,30 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/queue"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
 type Handler struct {
-	buckets *bucket.Store
-	store   *Store
-	s3      *storage.Client
-	protect func(auth.UserHandler) http.HandlerFunc
-	ac      *rbac.Checker
-	log     *audit.Logger
-	q       *queue.Client
+	buckets  *bucket.Store
+	store    *Store
+	s3       *storage.Client
+	s3fb     storage.Config
+	settings *platform.Store
+	protect  func(auth.UserHandler) http.HandlerFunc
+	ac       *rbac.Checker
+	log      *audit.Logger
+	q        *queue.Client
 }
 
-func NewHandler(buckets *bucket.Store, store *Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger, q *queue.Client) *Handler {
-	return &Handler{buckets: buckets, store: store, s3: s3, protect: protect, ac: ac, log: log, q: q}
+func NewHandler(buckets *bucket.Store, store *Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger, q *queue.Client, settings *platform.Store, s3fb storage.Config) *Handler {
+	return &Handler{buckets: buckets, store: store, s3: s3, s3fb: s3fb, settings: settings, protect: protect, ac: ac, log: log, q: q}
+}
+
+func (h *Handler) client(ctx context.Context) *storage.Client {
+	return storage.Live(ctx, h.s3fb, h.settings, h.s3)
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -90,21 +98,19 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request, user *auth.User) 
 	if maxKeys > maxListKeys {
 		maxKeys = maxListKeys
 	}
-	recs, err := h.store.ListPrefix(r.Context(), b.ID, prefix, after, scanCap)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "database error")
+	s3 := h.client(r.Context())
+	if s3 == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
 		return
 	}
-	items, prefixes, token, truncated := foldList(prefix, maxKeys, recs, len(recs) == scanCap)
-	out := make([]summary, 0, len(items))
-	for _, rec := range items {
-		out = append(out, summary{
-			Key: rec.Key, Size: rec.Size, ContentType: rec.ContentType,
-			LastModified: rec.LastModified, ETag: rec.ETag, UploadedBy: rec.UploadedBy,
-		})
+	items, prefixes, token, truncated, err := ListFromS3(r.Context(), s3, b.BucketName, prefix, after, maxKeys)
+	if err != nil {
+		httpx.Error(w, http.StatusBadGateway, "storage error")
+		return
 	}
+	h.enrichList(r.Context(), b, items)
 	httpx.JSON(w, http.StatusOK, map[string]any{
-		"items":              out,
+		"items":              items,
 		"prefixes":           prefixes,
 		"is_truncated":       truncated,
 		"continuation_token": token,
@@ -121,21 +127,74 @@ func (h *Handler) detail(w http.ResponseWriter, r *http.Request, user *auth.User
 	if !ok {
 		return
 	}
+	s3 := h.client(r.Context())
+	if s3 == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
+		return
+	}
+	meta, err := s3.HeadObject(r.Context(), b.BucketName, key)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			httpx.Error(w, http.StatusNotFound, "Object not found")
+			return
+		}
+		httpx.Error(w, http.StatusBadGateway, "storage error")
+		return
+	}
+	now := time.Now()
+	if err := h.store.UpsertSeen(r.Context(), b.ID, b.BucketName, key, meta.Size, meta.ETag, meta.StorageClass, now); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	if meta.ContentType != nil || meta.StorageClass != nil {
+		_ = h.store.PatchHead(r.Context(), b.ID, key, meta.ContentType, meta.StorageClass)
+	}
 	rec, err := h.store.Get(r.Context(), b.ID, key)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
-	if rec == nil {
-		httpx.Error(w, http.StatusNotFound, "Object not found")
+	out := detail{
+		Key: key, Size: meta.Size, ContentType: meta.ContentType, LastModified: meta.LastModified,
+		ETag: meta.ETag, StorageClass: meta.StorageClass, AccessPermission: "private",
+		ServerSideEncryption: meta.ServerSideEncryption, UserMetadata: meta.UserMetadata,
+	}
+	if out.UserMetadata == nil {
+		out.UserMetadata = map[string]string{}
+	}
+	if rec != nil {
+		if out.ContentType == nil {
+			out.ContentType = rec.ContentType
+		}
+		if out.StorageClass == nil {
+			out.StorageClass = rec.StorageClass
+		}
+		out.UploadedBy, out.UploadedByUsername = rec.UploadedBy, rec.Username
+		out.CreatedAt, out.UpdatedAt = rec.CreatedAt, rec.UpdatedAt
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) enrichList(ctx context.Context, b *bucket.Bucket, items []summary) {
+	if h.store == nil || b == nil || len(items) == 0 {
 		return
 	}
-	httpx.JSON(w, http.StatusOK, detail{
-		Key: rec.Key, Size: rec.Size, ContentType: rec.ContentType, LastModified: rec.LastModified,
-		ETag: rec.ETag, StorageClass: rec.StorageClass, UploadedBy: rec.UploadedBy,
-		UploadedByUsername: rec.Username, CreatedAt: rec.CreatedAt, UpdatedAt: rec.UpdatedAt,
-		AccessPermission: "private", UserMetadata: map[string]string{},
-	})
+	keys := make([]string, 0, len(items))
+	now := time.Now()
+	for _, it := range items {
+		keys = append(keys, it.Key)
+		_ = h.store.UpsertSeen(ctx, b.ID, b.BucketName, it.Key, it.Size, it.ETag, nil, now)
+	}
+	meta, err := h.store.MetaByKeys(ctx, b.ID, keys)
+	if err != nil {
+		return
+	}
+	for i := range items {
+		if rec, ok := meta[items[i].Key]; ok {
+			items[i].ContentType = rec.ContentType
+			items[i].UploadedBy = rec.UploadedBy
+		}
+	}
 }
 
 type mkdirReq struct {
@@ -144,7 +203,8 @@ type mkdirReq struct {
 }
 
 func (h *Handler) mkdir(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	if h.s3 == nil {
+	s3 := h.client(r.Context())
+	if s3 == nil {
 		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
 		return
 	}
@@ -171,14 +231,14 @@ func (h *Handler) mkdir(w http.ResponseWriter, r *http.Request, user *auth.User)
 	if !ok {
 		return
 	}
-	if _, err := h.s3.HeadObject(r.Context(), b.BucketName, key); err == nil {
+	if _, err := s3.HeadObject(r.Context(), b.BucketName, key); err == nil {
 		httpx.Error(w, http.StatusConflict, "Directory already exists")
 		return
 	} else if err != nil && !errors.Is(err, storage.ErrNotFound) {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
-	if _, err := h.s3.PutObject(r.Context(), b.BucketName, key, bytes.NewReader(nil), ""); err != nil {
+	if _, err := s3.PutObject(r.Context(), b.BucketName, key, bytes.NewReader(nil), ""); err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
@@ -208,7 +268,7 @@ func (h *Handler) bucket(w http.ResponseWriter, r *http.Request, user *auth.User
 }
 
 func (h *Handler) requireS3(w http.ResponseWriter) bool {
-	if h.s3 == nil {
+	if h.s3 == nil && !h.s3fb.Ready() {
 		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
 		return false
 	}

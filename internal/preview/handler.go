@@ -88,7 +88,7 @@ func (h *Handler) media(label string, allowed map[string]bool) auth.UserHandler 
 			httpx.Error(w, http.StatusBadRequest, "Object is not a supported "+label+" preview type")
 			return
 		}
-		url, expires, err := h.s3.PresignGet(r.Context(), b.BucketName, key)
+		url, expires, err := h.s3.PresignPreview(r.Context(), b.BucketName, key)
 		if err != nil {
 			httpx.Error(w, http.StatusBadGateway, "storage error")
 			return

@@ -75,6 +75,11 @@ func (h *Handler) authenticate(r *http.Request) (Principal, error) {
 	if err != nil {
 		return Principal{}, statusError{http.StatusUnauthorized, err.Error()}
 	}
+	if parsed.Type == "sts_session" {
+		if p, err := h.authSTS(r, parsed); err == nil {
+			return p, nil
+		}
+	}
 	key, err := h.store.GetKeyByAccessID(r.Context(), parsed.KeyID)
 	if err != nil {
 		return Principal{}, statusError{http.StatusInternalServerError, "database error"}
@@ -122,11 +127,17 @@ func (o *openAPI) listBuckets(w http.ResponseWriter, r *http.Request, p Principa
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
+	ids := make([]int64, 0, len(items))
+	for _, b := range items {
+		ids = append(ids, b.ID)
+	}
+	usage, _ := o.buckets.UsageByID(r.Context(), ids)
 	out := make([]map[string]any, 0, len(items))
 	for _, b := range items {
+		u := usage[b.ID]
 		out = append(out, map[string]any{
 			"bucket_name": b.BucketName, "display_name": b.DisplayName, "display_alias_only": b.DisplayAliasOnly,
-			"quota_bytes": b.QuotaBytes, "used_bytes": 0, "object_count": 0, "status": b.Status,
+			"quota_bytes": b.QuotaBytes, "used_bytes": u.UsedBytes, "object_count": u.ObjectCount, "status": b.Status,
 			"versioning_enabled": b.VersioningEnabled, "created_at": b.CreatedAt.UTC().Format(time.RFC3339),
 		})
 	}
@@ -147,9 +158,11 @@ func (o *openAPI) getBucket(w http.ResponseWriter, r *http.Request, p Principal)
 		httpx.Error(w, http.StatusNotFound, "Bucket not found")
 		return
 	}
+	usage, _ := o.buckets.UsageByID(r.Context(), []int64{b.ID})
+	u := usage[b.ID]
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"id": b.ID, "bucket_name": b.BucketName, "display_name": b.DisplayName, "display_alias_only": b.DisplayAliasOnly,
-		"quota_bytes": b.QuotaBytes, "object_limit": b.ObjectLimit, "used_bytes": 0, "object_count": 0,
+		"quota_bytes": b.QuotaBytes, "object_limit": b.ObjectLimit, "used_bytes": u.UsedBytes, "object_count": u.ObjectCount,
 		"versioning_enabled": b.VersioningEnabled, "access_logging_enabled": b.AccessLoggingEnabled,
 		"access_log_target_bucket": b.AccessLogTargetBucket, "access_log_prefix": b.AccessLogPrefix,
 		"status": b.Status, "created_at": b.CreatedAt.UTC().Format(time.RFC3339), "updated_at": b.UpdatedAt.UTC().Format(time.RFC3339),
@@ -180,16 +193,37 @@ func (o *openAPI) listObjects(w http.ResponseWriter, r *http.Request, p Principa
 		}
 		maxKeys = n
 	}
-	items, prefixes, token, truncated, err := o.objects.Folded(r.Context(), b.ID, q.Get("prefix"), q.Get("continuation_token"), maxKeys)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "database error")
+	if o.s3 == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
 		return
 	}
+	if maxKeys < 1 {
+		maxKeys = 1
+	}
+	if maxKeys > 1000 {
+		maxKeys = 1000
+	}
+	items, prefixes, token, truncated, err := objects.ListFromS3(r.Context(), o.s3, b.BucketName, q.Get("prefix"), q.Get("continuation_token"), maxKeys)
+	if err != nil {
+		httpx.Error(w, http.StatusBadGateway, "storage error")
+		return
+	}
+	keys := make([]string, 0, len(items))
+	now := time.Now()
+	for _, rec := range items {
+		keys = append(keys, rec.Key)
+		_ = o.objects.UpsertSeen(r.Context(), b.ID, b.BucketName, rec.Key, rec.Size, rec.ETag, nil, now)
+	}
+	meta, _ := o.objects.MetaByKeys(r.Context(), b.ID, keys)
 	out := make([]map[string]any, 0, len(items))
 	for _, rec := range items {
+		if m, ok := meta[rec.Key]; ok {
+			rec.ContentType = m.ContentType
+			rec.UploadedBy = m.UploadedBy
+		}
 		out = append(out, map[string]any{
 			"key": rec.Key, "size": rec.Size, "content_type": rec.ContentType,
-			"last_modified": rec.LastModified, "etag": rec.ETag,
+			"last_modified": rec.LastModified, "etag": rec.ETag, "uploaded_by": rec.UploadedBy,
 		})
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
@@ -330,11 +364,10 @@ func (o *openAPI) issueOpenSTS(w http.ResponseWriter, r *http.Request, p Princip
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
-	exp := time.Now().Add(time.Duration(dur) * time.Second)
-	token, err := signSTS(o.h.secret, key, exp)
-	if err != nil {
+	out := o.h.issueToken(r, key, parsed.Secret, dur)
+	if out == nil {
 		httpx.Error(w, http.StatusInternalServerError, "token error")
 		return
 	}
-	httpx.JSON(w, http.StatusOK, stsJSON(key.AccessKeyID, parsed.Secret, token, exp, dur, o.h.s3End, o.h.s3Reg))
+	httpx.JSON(w, http.StatusOK, out)
 }

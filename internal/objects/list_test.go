@@ -1,6 +1,10 @@
 package objects
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
+)
 
 func TestFoldList(t *testing.T) {
 	recs := []record{
@@ -31,6 +35,42 @@ func TestFoldList(t *testing.T) {
 	_, _, token, truncated = foldList("", 1, recs, false)
 	if !truncated || token == nil || *token != "a.txt" {
 		t.Fatalf("page token=%v truncated=%v", token, truncated)
+	}
+}
+
+func TestHiddenKey(t *testing.T) {
+	if !hiddenKey(".trash/a") || !hiddenKey(".versions/a") {
+		t.Fatal("hidden")
+	}
+	if hiddenKey("docs/a") {
+		t.Fatal("visible")
+	}
+}
+
+func TestDirectoryMarkerAndChildPrefix(t *testing.T) {
+	if !isDirectoryMarker("docs/", 0) || isDirectoryMarker("docs/", 3) || isDirectoryMarker("docs", 0) {
+		t.Fatal("marker")
+	}
+	if !isDirectChildPrefix("docs/", "") || !isDirectChildPrefix("docs/a/", "docs/") {
+		t.Fatal("direct")
+	}
+	if isDirectChildPrefix("docs/a/b/", "docs/") || isDirectChildPrefix("docs/a.txt", "docs/") {
+		t.Fatal("not direct")
+	}
+}
+
+func TestCollectPrefixesAddsMarkers(t *testing.T) {
+	page := storage.ListPage{
+		Prefixes: []string{"docs/"},
+		Objects: []storage.ListedObject{
+			{Key: "keep/", Size: 0},
+			{Key: ".trash/x/", Size: 0},
+			{Key: "docs/nested/deep/", Size: 0},
+		},
+	}
+	got := collectPrefixes(page, "")
+	if len(got) != 2 || got[0] != "docs/" || got[1] != "keep/" {
+		t.Fatalf("%#v", got)
 	}
 }
 
