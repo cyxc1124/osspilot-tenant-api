@@ -9,10 +9,12 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/cyxc1124/osspilot-tenant-api/internal/audit"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/config"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/queue"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/uploads"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/versions"
@@ -60,6 +62,7 @@ func main() {
 		Uploads:  uploads.NewStore(pool),
 		Settings: platform.NewStore(pool),
 		S3:       storage.New(s3cfg),
+		Log:      audit.NewLogger(pool),
 	}
 
 	mux := asynq.NewServeMux()
@@ -68,6 +71,9 @@ func main() {
 	mux.HandleFunc(worker.TaskTrash, jobs.Trash)
 	mux.HandleFunc(worker.TaskVersions, jobs.CleanVersions)
 	mux.HandleFunc(worker.TaskMultipart, jobs.CleanMultipart)
+	mux.HandleFunc(queue.TaskBatchDelete, jobs.BatchDelete)
+	mux.HandleFunc(queue.TaskBatchCopy, jobs.BatchCopy)
+	mux.HandleFunc(queue.TaskBatchMove, jobs.BatchMove)
 
 	srv := asynq.NewServer(redisOpt, asynq.Config{Concurrency: 2})
 	scheduler := asynq.NewScheduler(redisOpt, nil)

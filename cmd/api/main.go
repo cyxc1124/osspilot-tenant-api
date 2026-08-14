@@ -167,8 +167,14 @@ func main() {
 	authH := auth.NewHandler(authStore, cfg.JWTSecret, cfg.TokenTTL)
 	rbacH := rbac.NewHandler(authStore, rbacStore, bucketStore, authH.RequireUser, auditLog, cfg.ProjectionSecret)
 	ac := rbacH.Checker()
+	q := queue.New(cfg.RedisURL)
+	if q != nil {
+		defer q.Close()
+	} else {
+		slog.Warn("REDIS_URL unset; batch object ops and inventory enqueue return 503")
+	}
 	bucketH := bucket.NewHandler(bucketStore, authH.RequireUser, s3c, cfg.CORSOrigins, ac)
-	objectH := objects.NewHandler(bucketStore, objectStore, s3c, authH.RequireUser, ac, auditLog)
+	objectH := objects.NewHandler(bucketStore, objectStore, s3c, authH.RequireUser, ac, auditLog, q)
 	uploadH := uploads.NewHandler(s3c, bucketStore, objectStore, uploadStore, authH.RequireUser, ac, auditLog)
 	downloadH := downloads.NewHandler(s3c, bucketStore, authH.RequireUser, ac)
 	platformH := platform.NewHandler(settingsStore, authH.RequireUser, platform.Fallbacks{
@@ -178,12 +184,6 @@ func main() {
 		ObjectHTTPDomain:  cfg.ObjectHTTPDomain,
 		ObjectHTTPSDomain: cfg.ObjectHTTPSDomain,
 	}, cfg.ProjectionSecret)
-	q := queue.New(cfg.RedisURL)
-	if q != nil {
-		defer q.Close()
-	} else {
-		slog.Warn("REDIS_URL unset; internal inventory enqueue returns 503")
-	}
 	projectH := project.NewHandler(cfg.ProjectionSecret, authStore, bucketStore, credsStore, q)
 	versionH := versions.NewHandler(versionStore, bucketStore, s3c, authH.RequireUser, ac)
 	shareH := share.NewHandler(shareStore, bucketStore, s3c, authH.RequireUser, ac, auditLog)

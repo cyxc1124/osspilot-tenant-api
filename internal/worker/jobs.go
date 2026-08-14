@@ -10,6 +10,7 @@ import (
 
 	"github.com/hibiken/asynq"
 
+	"github.com/cyxc1124/osspilot-tenant-api/internal/audit"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
@@ -34,6 +35,7 @@ type Jobs struct {
 	Uploads  *uploads.Store
 	Settings *platform.Store
 	S3       *storage.Client
+	Log      *audit.Logger
 }
 
 func (j *Jobs) Inventory(ctx context.Context, _ *asynq.Task) error {

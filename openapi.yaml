@@ -119,9 +119,9 @@ paths:
       summary: Soft-delete objects into .trash/, or permanently delete when permanent=true
       responses:
         "200":
-          description: deleted and failed keys
+          description: deleted and failed keys, or status=queued when ≥2 keys
         "503":
-          description: storage is not configured
+          description: storage or Redis is not configured
   /api/buckets/{bucket_name}/objects/detail:
     get:
       summary: Object metadata
@@ -139,13 +139,17 @@ paths:
       summary: Copy objects within or across visible buckets
       responses:
         "200":
-          description: copied and failed
+          description: copied and failed, or status=queued when ≥2 items
+        "503":
+          description: storage or Redis is not configured
   /api/buckets/{bucket_name}/objects/move:
     post:
       summary: Move objects within a bucket
       responses:
         "200":
-          description: moved and failed
+          description: moved and failed, or status=queued when ≥2 items
+        "503":
+          description: storage or Redis is not configured
   /api/buckets/{bucket_name}/objects/rename:
     post:
       summary: Rename an object in place
