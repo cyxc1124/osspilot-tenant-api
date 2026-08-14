@@ -53,11 +53,24 @@ func (h *InternalHandler) usageHandler(w http.ResponseWriter, r *http.Request) {
 			"trash_bytes": b.TrashBytes, "trash_object_count": b.TrashCount,
 		})
 	}
+	classes, collected, err := h.usage.ByStorageClass(r.Context())
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	sc := make([]map[string]any, 0, len(classes))
+	for _, c := range classes {
+		sc = append(sc, map[string]any{"storage_class": c.StorageClass, "used_bytes": c.UsedBytes})
+	}
+	var collectedAt any
+	if collected != nil {
+		collectedAt = collected.UTC().Format(time.RFC3339)
+	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"used_bytes": totals.UsedBytes, "object_count": totals.ObjectCount,
 		"trash_bytes": totals.TrashBytes, "trash_object_count": totals.TrashCount,
 		"version_bytes": totals.VersionBytes, "version_object_count": totals.VersionCount,
-		"buckets": items,
+		"buckets": items, "storage_classes": sc, "collected_at": collectedAt,
 	})
 }
 

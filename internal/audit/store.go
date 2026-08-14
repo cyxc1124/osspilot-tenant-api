@@ -33,6 +33,9 @@ type Entry struct {
 
 type Filter struct {
 	AccountID   int64
+	AccountName string
+	Username    string
+	TenantName  string
 	UserID      *int64
 	BucketName  string
 	ObjectKey   string
@@ -94,11 +97,23 @@ func (s *Store) Export(ctx context.Context, f Filter) ([]Entry, error) {
 }
 
 func (f Filter) where() (string, []any) {
-	parts := []string{"l.account_id = $1"}
-	args := []any{f.AccountID}
+	var parts []string
+	var args []any
 	add := func(cond string, v any) {
 		args = append(args, v)
 		parts = append(parts, cond+"$"+itoa(len(args)))
+	}
+	if f.AccountID != 0 {
+		add("l.account_id = ", f.AccountID)
+	}
+	if f.AccountName != "" {
+		add("a.username = ", f.AccountName)
+	}
+	if f.Username != "" {
+		add("u.username ILIKE ", "%"+f.Username+"%")
+	}
+	if f.TenantName != "" {
+		add("a.username ILIKE ", "%"+f.TenantName+"%")
 	}
 	if f.UserID != nil {
 		add("l.tenant_user_id = ", *f.UserID)
@@ -133,6 +148,9 @@ func (f Filter) where() (string, []any) {
 	}
 	if f.CreatedTo != nil {
 		add("l.created_at <= ", *f.CreatedTo)
+	}
+	if len(parts) == 0 {
+		return "TRUE", args
 	}
 	return strings.Join(parts, " AND "), args
 }

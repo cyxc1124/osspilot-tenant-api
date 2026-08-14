@@ -41,6 +41,15 @@ func IsDirectoryKey(key string) bool {
 	return strings.HasSuffix(key, "/") && strings.Trim(key, "/") != ""
 }
 
+// KeyPrefix is the RBAC prefix for an object key (Python _object_prefix_for_permission).
+func KeyPrefix(key string) string {
+	i := strings.LastIndex(key, "/")
+	if i < 0 {
+		return key
+	}
+	return key[:i+1]
+}
+
 func uniqueOriginalKeys(keys []string) ([]string, error) {
 	seen := make(map[string]struct{}, len(keys))
 	out := make([]string, 0, len(keys))

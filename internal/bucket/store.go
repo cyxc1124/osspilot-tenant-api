@@ -112,6 +112,46 @@ func (s *Store) Ensure(ctx context.Context, name string, display *string) (int64
 	return id, nil
 }
 
+func (s *Store) OpsGrantIDs(ctx context.Context, userID int64) ([]int64, error) {
+	rows, err := s.pool.Query(ctx, `SELECT bucket_id FROM account_bucket_grants WHERE user_id = $1 AND NOT local`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("ops grant ids: %w", err)
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UnboundIDs(ctx context.Context, ids []int64) ([]int64, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT b.id FROM buckets b
+		WHERE b.id = ANY($1)
+		  AND NOT EXISTS (SELECT 1 FROM account_bucket_grants g WHERE g.bucket_id = b.id)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("unbound buckets: %w", err)
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ReplaceOpsGrants(ctx context.Context, userID int64, bucketIDs []int64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

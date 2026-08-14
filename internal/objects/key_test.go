@@ -38,6 +38,18 @@ func TestIsDirectoryKey(t *testing.T) {
 	}
 }
 
+func TestKeyPrefix(t *testing.T) {
+	if got := KeyPrefix("a.txt"); got != "a.txt" {
+		t.Fatal(got)
+	}
+	if got := KeyPrefix("docs/a.txt"); got != "docs/" {
+		t.Fatal(got)
+	}
+	if got := KeyPrefix("docs/"); got != "docs/" {
+		t.Fatal(got)
+	}
+}
+
 func TestUniqueOriginalKeys(t *testing.T) {
 	got, err := uniqueOriginalKeys([]string{"a.txt", "b.txt", "a.txt"})
 	if err != nil || len(got) != 2 || got[0] != "a.txt" || got[1] != "b.txt" {

@@ -35,11 +35,18 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request, user *auth.User
 			return
 		}
 	}
-	b, ok := h.bucket(w, r, user, rbac.ActionDelete, "")
+	b, ok := h.visible(w, r, user)
 	if !ok {
 		return
 	}
 	permanent := strings.EqualFold(r.URL.Query().Get("permanent"), "true")
+	action := rbac.ActionDelete
+	if permanent {
+		action = rbac.ActionAdmin
+	}
+	if h.denyKeys(w, r, user, b.BucketName, action, keys) {
+		return
+	}
 	if shouldQueue(len(keys)) {
 		if h.missingQueue(w, len(keys)) {
 			return

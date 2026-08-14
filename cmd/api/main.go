@@ -191,7 +191,7 @@ func main() {
 		ObjectHTTPDomain:  cfg.ObjectHTTPDomain,
 		ObjectHTTPSDomain: cfg.ObjectHTTPSDomain,
 	}, cfg.ProjectionSecret, q)
-	projectH := project.NewHandler(cfg.ProjectionSecret, authStore, bucketStore, credsStore, q)
+	projectH := project.NewHandler(cfg.ProjectionSecret, authStore, bucketStore, credsStore, q, objectStore)
 	versionH := versions.NewHandler(versionStore, bucketStore, s3c, authH.RequireUser, ac)
 	shareH := share.NewHandler(shareStore, bucketStore, s3c, authH.RequireUser, ac, auditLog)
 	editH := edit.NewHandler(editStore, bucketStore, versionStore, settingsStore, s3c, authH.RequireUser, edit.OfficeEnv{
@@ -199,7 +199,7 @@ func main() {
 	}, ac, cfg.ProjectionSecret)
 	credsH := creds.NewHandler(credsStore, authH.RequireUser, ac, cfg.S3Endpoint, cfg.S3Region, cfg.JWTSecret, bucketStore, objectStore, uploadStore, s3c, auditLog, qc)
 	statsH := stats.NewHandler(statsStore, bucketStore, authStore, authH.RequireUser, ac)
-	auditH := audit.NewHandler(auditStore, authH.RequireUser, ac)
+	auditH := audit.NewHandler(auditStore, authH.RequireUser, ac, cfg.ProjectionSecret)
 	var usageH *stats.InternalHandler
 	if pool != nil {
 		usageH = stats.NewInternalHandler(stats.NewUsageStore(pool), statsStore, cfg.ProjectionSecret)

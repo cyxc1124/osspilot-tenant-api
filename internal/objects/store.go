@@ -223,6 +223,17 @@ func (s *Store) ListLiveKeys(ctx context.Context, bucketID int64, prefix string)
 	return out, rows.Err()
 }
 
+func (s *Store) DeleteByBucket(ctx context.Context, bucketID int64) error {
+	if s == nil || s.pool == nil {
+		return nil
+	}
+	_, err := s.pool.Exec(ctx, `DELETE FROM object_records WHERE bucket_id = $1`, bucketID)
+	if err != nil {
+		return fmt.Errorf("delete bucket records: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) Delete(ctx context.Context, bucketID int64, key string) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM object_records WHERE bucket_id = $1 AND object_key = $2`, bucketID, key)
 	if err != nil {

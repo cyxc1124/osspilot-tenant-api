@@ -1,8 +1,10 @@
 package audit
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
@@ -14,15 +16,17 @@ type Handler struct {
 	store   *Store
 	protect func(auth.UserHandler) http.HandlerFunc
 	ac      *rbac.Checker
+	secret  string
 }
 
-func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker) *Handler {
-	return &Handler{store: store, protect: protect, ac: ac}
+func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, secret string) *Handler {
+	return &Handler{store: store, protect: protect, ac: ac, secret: secret}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/audit-logs", h.protect(h.list))
 	mux.HandleFunc("GET /api/audit-logs/export", h.protect(h.export))
+	mux.HandleFunc("GET /internal/stats/audit-logs", h.internalList)
 }
 
 func (h *Handler) ready(w http.ResponseWriter) bool {
@@ -154,6 +158,64 @@ func (h *Handler) export(w http.ResponseWriter, r *http.Request, user *auth.User
 	if err := writeCSV(w, items); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "export error")
 	}
+}
+
+func (h *Handler) internalList(w http.ResponseWriter, r *http.Request) {
+	if h.secret == "" || h.store == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "projection is not configured")
+		return
+	}
+	if !internalOK(r.Header.Get("Authorization"), h.secret) {
+		httpx.Error(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	f, ok := h.parseFilter(w, r, 0)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	f.Username = q.Get("username")
+	f.TenantName = q.Get("tenant_name")
+	f.AccountName = q.Get("account_name")
+	page, pageSize := 1, 20
+	if raw := q.Get("page"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			httpx.Error(w, http.StatusBadRequest, "page must be >= 1")
+			return
+		}
+		page = n
+	}
+	if raw := q.Get("page_size"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 10000 {
+			httpx.Error(w, http.StatusBadRequest, "page_size must be 1-10000")
+			return
+		}
+		pageSize = n
+	}
+	items, total, err := h.store.List(r.Context(), f, page, pageSize)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, e := range items {
+		out = append(out, entryJSON(e))
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": out, "page": page, "page_size": pageSize, "total": total})
+}
+
+func internalOK(header, secret string) bool {
+	const p = "Bearer "
+	if secret == "" || !strings.HasPrefix(header, p) {
+		return false
+	}
+	got := strings.TrimSpace(header[len(p):])
+	if len(got) != len(secret) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(secret)) == 1
 }
 
 func entryJSON(e Entry) map[string]any {

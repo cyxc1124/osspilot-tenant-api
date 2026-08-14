@@ -3,6 +3,7 @@ package project
 import (
 	"context"
 	"crypto/subtle"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -18,14 +19,19 @@ type Handler struct {
 	buckets *bucket.Store
 	creds   *creds.Store
 	queue   inventoryQueue
+	records recordPurger
 }
 
 type inventoryQueue interface {
 	EnqueueInventory(ctx context.Context, bucketName string) (string, error)
 }
 
-func NewHandler(secret string, users *auth.Store, buckets *bucket.Store, credsStore *creds.Store, q inventoryQueue) *Handler {
-	return &Handler{secret: secret, users: users, buckets: buckets, creds: credsStore, queue: q}
+type recordPurger interface {
+	DeleteByBucket(ctx context.Context, bucketID int64) error
+}
+
+func NewHandler(secret string, users *auth.Store, buckets *bucket.Store, credsStore *creds.Store, q inventoryQueue, records recordPurger) *Handler {
+	return &Handler{secret: secret, users: users, buckets: buckets, creds: credsStore, queue: q, records: records}
 }
 
 type accountReq struct {
@@ -115,7 +121,18 @@ func (h *Handler) replaceBuckets(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusNotFound, "Account not found")
 		return
 	}
+	old, err := h.buckets.OpsGrantIDs(r.Context(), user.ID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	oldSet := make(map[int64]struct{}, len(old))
+	for _, id := range old {
+		oldSet[id] = struct{}{}
+	}
 	ids := make([]int64, 0, len(req.Items))
+	added := make([]string, 0)
+	newSet := make(map[int64]struct{}, len(req.Items))
 	for _, item := range req.Items {
 		id, err := h.buckets.Ensure(r.Context(), item.BucketName, item.DisplayName)
 		if err != nil {
@@ -123,10 +140,34 @@ func (h *Handler) replaceBuckets(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		ids = append(ids, id)
+		newSet[id] = struct{}{}
+		if _, ok := oldSet[id]; !ok {
+			added = append(added, item.BucketName)
+		}
 	}
 	if err := h.buckets.ReplaceOpsGrants(r.Context(), user.ID, ids); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
+	}
+	var removed []int64
+	for _, id := range old {
+		if _, ok := newSet[id]; !ok {
+			removed = append(removed, id)
+		}
+	}
+	if unbound, err := h.buckets.UnboundIDs(r.Context(), removed); err == nil && h.records != nil {
+		for _, id := range unbound {
+			if err := h.records.DeleteByBucket(r.Context(), id); err != nil {
+				slog.Warn("purge unbound object_records", "bucket_id", id, "err", err)
+			}
+		}
+	}
+	if h.queue != nil {
+		for _, name := range added {
+			if _, err := h.queue.EnqueueInventory(r.Context(), name); err != nil {
+				slog.Warn("enqueue inventory after grant", "bucket", name, "err", err)
+			}
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

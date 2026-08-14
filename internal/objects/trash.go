@@ -92,11 +92,16 @@ func (h *Handler) runTrashOp(w http.ResponseWriter, r *http.Request, user *auth.
 		return
 	}
 	action := rbac.ActionDelete
+	name := "purge"
 	if restore {
 		action = rbac.ActionRestore
+		name = "restore"
 	}
-	b, ok := h.bucket(w, r, user, action, "")
+	b, ok := h.visible(w, r, user)
 	if !ok {
+		return
+	}
+	if h.denyKeys(w, r, user, b.BucketName, action, keys) {
 		return
 	}
 	succeeded := make([]string, 0, len(keys))
@@ -111,9 +116,11 @@ func (h *Handler) runTrashOp(w http.ResponseWriter, r *http.Request, user *auth.
 		}
 		if opErr != nil {
 			failed = append(failed, opFailure{Key: key, Error: trashErr(opErr)})
+			h.log.Record(r, user, b.BucketName, key, name, "failure", trashErr(opErr))
 			continue
 		}
 		succeeded = append(succeeded, key)
+		h.log.Record(r, user, b.BucketName, key, name, "success", "")
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"succeeded": succeeded, "failed": failed})
 }

@@ -3,6 +3,7 @@ package stats
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -22,6 +23,11 @@ type BucketUsage struct {
 	ObjectCount int64
 	TrashBytes  int64
 	TrashCount  int64
+}
+
+type StorageClassUsage struct {
+	StorageClass string
+	UsedBytes    int64
 }
 
 type UsageStore struct {
@@ -74,4 +80,32 @@ func (s *UsageStore) ByBucket(ctx context.Context) ([]BucketUsage, error) {
 		out = append(out, b)
 	}
 	return out, rows.Err()
+}
+
+func (s *UsageStore) ByStorageClass(ctx context.Context) ([]StorageClassUsage, *time.Time, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT COALESCE(storage_class, 'STANDARD'), COALESCE(SUM(size), 0), MAX(last_seen_at)
+		FROM object_records
+		WHERE object_key NOT LIKE '.trash/%' AND object_key <> '.trash/'
+		  AND object_key NOT LIKE '.versions/%' AND object_key <> '.versions/'
+		GROUP BY 1
+		ORDER BY 2 DESC`)
+	if err != nil {
+		return nil, nil, fmt.Errorf("usage by storage class: %w", err)
+	}
+	defer rows.Close()
+	var out []StorageClassUsage
+	var collected *time.Time
+	for rows.Next() {
+		var u StorageClassUsage
+		var seen *time.Time
+		if err := rows.Scan(&u.StorageClass, &u.UsedBytes, &seen); err != nil {
+			return nil, nil, err
+		}
+		out = append(out, u)
+		if seen != nil && (collected == nil || seen.After(*collected)) {
+			collected = seen
+		}
+	}
+	return out, collected, rows.Err()
 }

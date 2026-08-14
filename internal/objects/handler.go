@@ -252,6 +252,17 @@ func (h *Handler) mkdir(w http.ResponseWriter, r *http.Request, user *auth.User)
 }
 
 func (h *Handler) bucket(w http.ResponseWriter, r *http.Request, user *auth.User, action, prefix string) (*bucket.Bucket, bool) {
+	b, ok := h.visible(w, r, user)
+	if !ok {
+		return nil, false
+	}
+	if h.ac.Forbidden(w, r, user, b.BucketName, prefix, action) {
+		return nil, false
+	}
+	return b, true
+}
+
+func (h *Handler) visible(w http.ResponseWriter, r *http.Request, user *auth.User) (*bucket.Bucket, bool) {
 	b, err := h.buckets.GetVisible(r.Context(), auth.AccountID(user), r.PathValue("bucket_name"))
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
@@ -261,10 +272,16 @@ func (h *Handler) bucket(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusNotFound, "Bucket not found")
 		return nil, false
 	}
-	if h.ac.Forbidden(w, r, user, b.BucketName, prefix, action) {
-		return nil, false
-	}
 	return b, true
+}
+
+func (h *Handler) denyKeys(w http.ResponseWriter, r *http.Request, user *auth.User, bucketName, action string, keys []string) bool {
+	for _, key := range keys {
+		if h.ac.Forbidden(w, r, user, bucketName, KeyPrefix(key), action) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) requireS3(w http.ResponseWriter) bool {
