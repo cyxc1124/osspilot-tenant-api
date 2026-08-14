@@ -24,7 +24,7 @@ type Principal struct {
 }
 
 func (h *Handler) registerOpen(mux *http.ServeMux) {
-	o := &openAPI{h: h, buckets: h.buckets, objects: h.objects, uploads: h.uploads, s3: h.s3}
+	o := &openAPI{h: h, buckets: h.buckets, objects: h.objects, uploads: h.uploads}
 	mux.HandleFunc("GET /api/v1/buckets", o.auth(o.listBuckets))
 	mux.HandleFunc("GET /api/v1/buckets/{bucket_name}", o.auth(o.getBucket))
 	mux.HandleFunc("GET /api/v1/buckets/{bucket_name}/objects", o.auth(o.listObjects))
@@ -38,7 +38,6 @@ type openAPI struct {
 	buckets *bucket.Store
 	objects *objects.Store
 	uploads *uploads.Store
-	s3      *storage.Client
 }
 
 type openHandler func(http.ResponseWriter, *http.Request, Principal)
@@ -193,7 +192,8 @@ func (o *openAPI) listObjects(w http.ResponseWriter, r *http.Request, p Principa
 		}
 		maxKeys = n
 	}
-	if o.s3 == nil {
+	s3 := o.h.client(r)
+	if s3 == nil {
 		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
 		return
 	}
@@ -203,7 +203,7 @@ func (o *openAPI) listObjects(w http.ResponseWriter, r *http.Request, p Principa
 	if maxKeys > 1000 {
 		maxKeys = 1000
 	}
-	items, prefixes, token, truncated, err := objects.ListFromS3(r.Context(), o.s3, b.BucketName, q.Get("prefix"), q.Get("continuation_token"), maxKeys)
+	items, prefixes, token, truncated, err := objects.ListFromS3(r.Context(), s3, b.BucketName, q.Get("prefix"), q.Get("continuation_token"), maxKeys)
 	if err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
@@ -232,7 +232,8 @@ func (o *openAPI) listObjects(w http.ResponseWriter, r *http.Request, p Principa
 }
 
 func (o *openAPI) presignUpload(w http.ResponseWriter, r *http.Request, p Principal) {
-	if o.s3 == nil {
+	s3 := o.h.client(r)
+	if s3 == nil {
 		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
 		return
 	}
@@ -271,7 +272,7 @@ func (o *openAPI) presignUpload(w http.ResponseWriter, r *http.Request, p Princi
 	if req.ContentType != nil {
 		ct = *req.ContentType
 	}
-	url, expires, err := o.s3.PresignPut(r.Context(), b.BucketName, req.ObjectKey, ct)
+	url, expires, err := s3.PresignPut(r.Context(), b.BucketName, req.ObjectKey, ct)
 	if err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
@@ -289,7 +290,8 @@ func (o *openAPI) presignUpload(w http.ResponseWriter, r *http.Request, p Princi
 }
 
 func (o *openAPI) presignDownload(w http.ResponseWriter, r *http.Request, p Principal) {
-	if o.s3 == nil {
+	s3 := o.h.client(r)
+	if s3 == nil {
 		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
 		return
 	}
@@ -318,7 +320,7 @@ func (o *openAPI) presignDownload(w http.ResponseWriter, r *http.Request, p Prin
 		httpx.Error(w, http.StatusNotFound, "Bucket not found")
 		return
 	}
-	if _, err := o.s3.HeadObject(r.Context(), b.BucketName, req.ObjectKey); err != nil {
+	if _, err := s3.HeadObject(r.Context(), b.BucketName, req.ObjectKey); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			httpx.Error(w, http.StatusNotFound, "Object not found")
 			return
@@ -326,7 +328,7 @@ func (o *openAPI) presignDownload(w http.ResponseWriter, r *http.Request, p Prin
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
-	url, expires, err := o.s3.PresignGet(r.Context(), b.BucketName, req.ObjectKey)
+	url, expires, err := s3.PresignGet(r.Context(), b.BucketName, req.ObjectKey)
 	if err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return

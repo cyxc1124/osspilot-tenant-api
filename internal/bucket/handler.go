@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/cyxc1124/osspilot-tenant-api/internal/audit"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
@@ -15,13 +17,20 @@ import (
 type Handler struct {
 	store       *Store
 	s3          *storage.Client
+	s3fb        storage.Config
+	settings    *platform.Store
 	protect     func(auth.UserHandler) http.HandlerFunc
 	corsOrigins []string
 	ac          *rbac.Checker
+	log         *audit.Logger
 }
 
-func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, s3 *storage.Client, corsOrigins []string, ac *rbac.Checker) *Handler {
-	return &Handler{store: store, protect: protect, s3: s3, corsOrigins: corsOrigins, ac: ac}
+func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, s3 *storage.Client, corsOrigins []string, ac *rbac.Checker, log *audit.Logger, settings *platform.Store, s3fb storage.Config) *Handler {
+	return &Handler{store: store, protect: protect, s3: s3, s3fb: s3fb, settings: settings, corsOrigins: corsOrigins, ac: ac, log: log}
+}
+
+func (h *Handler) client(ctx context.Context) *storage.Client {
+	return storage.Live(ctx, h.s3fb, h.settings, h.s3)
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -171,31 +180,31 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
-	if h.s3 != nil {
-		if err := h.s3.EnsureBucket(r.Context(), b.BucketName); err != nil {
+	if s3 := h.client(r.Context()); s3 != nil {
+		if err := s3.EnsureBucket(r.Context(), b.BucketName); err != nil {
 			_ = h.store.Delete(r.Context(), b.ID)
 			httpx.Error(w, http.StatusBadGateway, "storage error")
 			return
 		}
 		if rules := defaultCorsRules(h.corsOrigins); len(rules) > 0 {
-			if err := h.s3.PutBucketCORS(r.Context(), b.BucketName, toStorageCORS(rules)); err != nil {
-				_ = h.s3.DeleteBucket(r.Context(), b.BucketName)
+			if err := s3.PutBucketCORS(r.Context(), b.BucketName, toStorageCORS(rules)); err != nil {
+				_ = s3.DeleteBucket(r.Context(), b.BucketName)
 				_ = h.store.Delete(r.Context(), b.ID)
 				httpx.Error(w, http.StatusBadGateway, "storage error")
 				return
 			}
 		}
 		if b.VersioningEnabled {
-			if err := h.s3.PutBucketVersioning(r.Context(), b.BucketName, "Enabled"); err != nil {
-				_ = h.s3.DeleteBucket(r.Context(), b.BucketName)
+			if err := s3.PutBucketVersioning(r.Context(), b.BucketName, "Enabled"); err != nil {
+				_ = s3.DeleteBucket(r.Context(), b.BucketName)
 				_ = h.store.Delete(r.Context(), b.ID)
 				httpx.Error(w, http.StatusBadGateway, "storage error")
 				return
 			}
 		}
 		if b.AccessLoggingEnabled {
-			if err := h.applyLogging(r.Context(), b); err != nil {
-				_ = h.s3.DeleteBucket(r.Context(), b.BucketName)
+			if err := h.applyLogging(r.Context(), s3, b); err != nil {
+				_ = s3.DeleteBucket(r.Context(), b.BucketName)
 				_ = h.store.Delete(r.Context(), b.ID)
 				httpx.Error(w, http.StatusBadGateway, "storage error")
 				return
@@ -203,6 +212,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 			_ = h.store.Update(r.Context(), b)
 		}
 	}
+	h.log.Record(r, user, b.BucketName, "", "bucket_create", "success", "")
 	httpx.JSON(w, http.StatusCreated, toDetail(*b, Usage{}))
 }
 
@@ -224,6 +234,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusBadRequest, "invalid json")
 		return
 	}
+	action := updateAction(req, *b)
 	if req.DisplayName != nil {
 		b.DisplayName = emptyToNil(req.DisplayName)
 	}
@@ -256,19 +267,20 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, user *auth.User
 	if err := h.validateLogging(w, r, user, b.AccessLoggingEnabled, b.AccessLogTargetBucket, b.BucketName); err != nil {
 		return
 	}
-	if h.s3 != nil && b.VersioningEnabled != prevVer {
+	s3 := h.client(r.Context())
+	if s3 != nil && b.VersioningEnabled != prevVer {
 		status := "Suspended"
 		if b.VersioningEnabled {
 			status = "Enabled"
 		}
-		if err := h.s3.PutBucketVersioning(r.Context(), b.BucketName, status); err != nil {
+		if err := s3.PutBucketVersioning(r.Context(), b.BucketName, status); err != nil {
 			httpx.Error(w, http.StatusBadGateway, "storage error")
 			return
 		}
 	}
 	logChanged := b.AccessLoggingEnabled != prevLog || strPtr(b.AccessLogTargetBucket) != strPtr(prevTarget) || strPtr(b.AccessLogPrefix) != strPtr(prevPrefix)
-	if h.s3 != nil && logChanged {
-		if err := h.applyLogging(r.Context(), b); err != nil {
+	if s3 != nil && logChanged {
+		if err := h.applyLogging(r.Context(), s3, b); err != nil {
 			httpx.Error(w, http.StatusBadGateway, "storage error")
 			return
 		}
@@ -278,6 +290,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
+	h.log.Record(r, user, b.BucketName, "", action, "success", "")
 	httpx.JSON(w, http.StatusOK, h.detail(r.Context(), *b))
 }
 
@@ -286,8 +299,8 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request, user *auth.User
 	if !ok {
 		return
 	}
-	if h.s3 != nil {
-		if err := h.s3.DeleteBucket(r.Context(), b.BucketName); err != nil {
+	if s3 := h.client(r.Context()); s3 != nil {
+		if err := s3.DeleteBucket(r.Context(), b.BucketName); err != nil {
 			if errors.Is(err, storage.ErrNotEmpty) {
 				httpx.Error(w, http.StatusConflict, "bucket.not_empty")
 				return
@@ -302,6 +315,7 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
+	h.log.Record(r, user, b.BucketName, "", "bucket_delete", "success", "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -349,19 +363,19 @@ var errLogging = errors.New("logging")
 
 func defaultLogPrefix(bucket string) string { return "access-logs/" + bucket + "/" }
 
-func (h *Handler) applyLogging(ctx context.Context, b *Bucket) error {
-	if h.s3 == nil {
+func (h *Handler) applyLogging(ctx context.Context, s3 *storage.Client, b *Bucket) error {
+	if s3 == nil {
 		return nil
 	}
 	if !b.AccessLoggingEnabled {
 		b.AccessLogTargetBucket, b.AccessLogPrefix = nil, nil
-		return h.s3.PutBucketLogging(ctx, b.BucketName, false, nil, nil)
+		return s3.PutBucketLogging(ctx, b.BucketName, false, nil, nil)
 	}
 	if b.AccessLogPrefix == nil || *b.AccessLogPrefix == "" {
 		p := defaultLogPrefix(b.BucketName)
 		b.AccessLogPrefix = &p
 	}
-	return h.s3.PutBucketLogging(ctx, b.BucketName, true, b.AccessLogTargetBucket, b.AccessLogPrefix)
+	return s3.PutBucketLogging(ctx, b.BucketName, true, b.AccessLogTargetBucket, b.AccessLogPrefix)
 }
 
 func emptyToNil(s *string) *string {

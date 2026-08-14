@@ -12,20 +12,27 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
 type Handler struct {
-	s3      *storage.Client
-	buckets *bucket.Store
-	protect func(auth.UserHandler) http.HandlerFunc
-	ac      *rbac.Checker
-	log     *audit.Logger
+	s3       *storage.Client
+	s3fb     storage.Config
+	settings *platform.Store
+	buckets  *bucket.Store
+	protect  func(auth.UserHandler) http.HandlerFunc
+	ac       *rbac.Checker
+	log      *audit.Logger
 }
 
-func NewHandler(s3 *storage.Client, buckets *bucket.Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger) *Handler {
-	return &Handler{s3: s3, buckets: buckets, protect: protect, ac: ac, log: log}
+func NewHandler(s3 *storage.Client, buckets *bucket.Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger, settings *platform.Store, s3fb storage.Config) *Handler {
+	return &Handler{s3: s3, s3fb: s3fb, settings: settings, buckets: buckets, protect: protect, ac: ac, log: log}
+}
+
+func (h *Handler) client(r *http.Request) *storage.Client {
+	return storage.Live(r.Context(), h.s3fb, h.settings, h.s3)
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -49,7 +56,12 @@ func (h *Handler) text(w http.ResponseWriter, r *http.Request, user *auth.User) 
 		httpx.Error(w, http.StatusRequestEntityTooLarge, "Text preview limited to 524288 bytes")
 		return
 	}
-	raw, ct, err := h.s3.GetObject(r.Context(), b.BucketName, key, maxTextBytes+1)
+	s3 := h.client(r)
+	if s3 == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
+		return
+	}
+	raw, ct, err := s3.GetObject(r.Context(), b.BucketName, key, maxTextBytes+1)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			httpx.Error(w, http.StatusNotFound, "Object not found")
@@ -88,7 +100,12 @@ func (h *Handler) media(label string, allowed map[string]bool) auth.UserHandler 
 			httpx.Error(w, http.StatusBadRequest, "Object is not a supported "+label+" preview type")
 			return
 		}
-		url, expires, err := h.s3.PresignPreview(r.Context(), b.BucketName, key)
+		s3 := h.client(r)
+		if s3 == nil {
+			httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
+			return
+		}
+		url, expires, err := s3.PresignPreview(r.Context(), b.BucketName, key)
 		if err != nil {
 			httpx.Error(w, http.StatusBadGateway, "storage error")
 			return
@@ -109,7 +126,8 @@ func (h *Handler) media(label string, allowed map[string]bool) auth.UserHandler 
 
 func (h *Handler) resolve(w http.ResponseWriter, r *http.Request, user *auth.User) (*bucket.Bucket, string, storage.ObjectMeta, bool) {
 	var zero storage.ObjectMeta
-	if h.s3 == nil {
+	s3 := h.client(r)
+	if s3 == nil {
 		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
 		return nil, "", zero, false
 	}
@@ -135,7 +153,7 @@ func (h *Handler) resolve(w http.ResponseWriter, r *http.Request, user *auth.Use
 	if h.ac.Forbidden(w, r, user, b.BucketName, key, rbac.ActionRead) {
 		return nil, "", zero, false
 	}
-	meta, err := h.s3.HeadObject(r.Context(), b.BucketName, key)
+	meta, err := s3.HeadObject(r.Context(), b.BucketName, key)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			httpx.Error(w, http.StatusNotFound, "Object not found")

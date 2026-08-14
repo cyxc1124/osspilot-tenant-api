@@ -6,6 +6,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
 func (h *Handler) getPolicy(w http.ResponseWriter, r *http.Request, user *auth.User) {
@@ -13,10 +14,11 @@ func (h *Handler) getPolicy(w http.ResponseWriter, r *http.Request, user *auth.U
 	if !ok {
 		return
 	}
-	if !h.requireS3(w) {
+	s3 := h.live(w, r)
+	if s3 == nil {
 		return
 	}
-	policy, err := h.s3.GetBucketPolicy(r.Context(), b.BucketName)
+	policy, err := s3.GetBucketPolicy(r.Context(), b.BucketName)
 	if err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
@@ -33,7 +35,8 @@ func (h *Handler) putPolicy(w http.ResponseWriter, r *http.Request, user *auth.U
 	if !ok {
 		return
 	}
-	if !h.requireS3(w) {
+	s3 := h.live(w, r)
+	if s3 == nil {
 		return
 	}
 	var req struct {
@@ -47,10 +50,11 @@ func (h *Handler) putPolicy(w http.ResponseWriter, r *http.Request, user *auth.U
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.s3.PutBucketPolicy(r.Context(), b.BucketName, req.Policy); err != nil {
+	if err := s3.PutBucketPolicy(r.Context(), b.BucketName, req.Policy); err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
+	h.log.Record(r, user, b.BucketName, "", "modify_bucket_policy", "success", "")
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"bucket_name": b.BucketName,
 		"policy":      req.Policy,
@@ -63,13 +67,15 @@ func (h *Handler) deletePolicy(w http.ResponseWriter, r *http.Request, user *aut
 	if !ok {
 		return
 	}
-	if !h.requireS3(w) {
+	s3 := h.live(w, r)
+	if s3 == nil {
 		return
 	}
-	if err := h.s3.DeleteBucketPolicy(r.Context(), b.BucketName); err != nil {
+	if err := s3.DeleteBucketPolicy(r.Context(), b.BucketName); err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
+	h.log.Record(r, user, b.BucketName, "", "modify_bucket_policy", "success", "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -78,10 +84,11 @@ func (h *Handler) getCors(w http.ResponseWriter, r *http.Request, user *auth.Use
 	if !ok {
 		return
 	}
-	if !h.requireS3(w) {
+	s3 := h.live(w, r)
+	if s3 == nil {
 		return
 	}
-	rules, err := h.s3.GetBucketCORS(r.Context(), b.BucketName)
+	rules, err := s3.GetBucketCORS(r.Context(), b.BucketName)
 	if err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
@@ -102,7 +109,8 @@ func (h *Handler) putCors(w http.ResponseWriter, r *http.Request, user *auth.Use
 	if !ok {
 		return
 	}
-	if !h.requireS3(w) {
+	s3 := h.live(w, r)
+	if s3 == nil {
 		return
 	}
 	var req struct {
@@ -117,10 +125,11 @@ func (h *Handler) putCors(w http.ResponseWriter, r *http.Request, user *auth.Use
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := h.s3.PutBucketCORS(r.Context(), b.BucketName, toStorageCORS(validated)); err != nil {
+	if err := s3.PutBucketCORS(r.Context(), b.BucketName, toStorageCORS(validated)); err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
+	h.log.Record(r, user, b.BucketName, "", "modify_bucket_cors", "success", "")
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"bucket_name": b.BucketName,
 		"cors_rules":  responseCors(validated),
@@ -133,22 +142,25 @@ func (h *Handler) deleteCors(w http.ResponseWriter, r *http.Request, user *auth.
 	if !ok {
 		return
 	}
-	if !h.requireS3(w) {
+	s3 := h.live(w, r)
+	if s3 == nil {
 		return
 	}
-	if err := h.s3.DeleteBucketCORS(r.Context(), b.BucketName); err != nil {
+	if err := s3.DeleteBucketCORS(r.Context(), b.BucketName); err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
+	h.log.Record(r, user, b.BucketName, "", "modify_bucket_cors", "success", "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) requireS3(w http.ResponseWriter) bool {
-	if h.s3 == nil {
+func (h *Handler) live(w http.ResponseWriter, r *http.Request) *storage.Client {
+	s3 := h.client(r.Context())
+	if s3 == nil {
 		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
-		return false
+		return nil
 	}
-	return true
+	return s3
 }
 
 func responseCors(rules []corsRule) []corsRule {

@@ -9,20 +9,27 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
 type Handler struct {
-	s3      *storage.Client
-	buckets *bucket.Store
-	protect func(auth.UserHandler) http.HandlerFunc
-	ac      *rbac.Checker
-	log     *audit.Logger
+	s3       *storage.Client
+	s3fb     storage.Config
+	settings *platform.Store
+	buckets  *bucket.Store
+	protect  func(auth.UserHandler) http.HandlerFunc
+	ac       *rbac.Checker
+	log      *audit.Logger
 }
 
-func NewHandler(s3 *storage.Client, buckets *bucket.Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger) *Handler {
-	return &Handler{s3: s3, buckets: buckets, protect: protect, ac: ac, log: log}
+func NewHandler(s3 *storage.Client, buckets *bucket.Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger, settings *platform.Store, s3fb storage.Config) *Handler {
+	return &Handler{s3: s3, s3fb: s3fb, settings: settings, buckets: buckets, protect: protect, ac: ac, log: log}
+}
+
+func (h *Handler) client(r *http.Request) *storage.Client {
+	return storage.Live(r.Context(), h.s3fb, h.settings, h.s3)
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -41,7 +48,7 @@ type batchReq struct {
 }
 
 func (h *Handler) presign(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	if h.s3 == nil {
+	if h.client(r) == nil {
 		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
 		return
 	}
@@ -60,7 +67,7 @@ func (h *Handler) presign(w http.ResponseWriter, r *http.Request, user *auth.Use
 }
 
 func (h *Handler) batch(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	if h.s3 == nil {
+	if h.client(r) == nil {
 		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
 		return
 	}
@@ -105,13 +112,17 @@ func (h *Handler) one(w http.ResponseWriter, r *http.Request, user *auth.User, b
 	if !ok {
 		return "", 0, errSilent
 	}
-	if _, err := h.s3.HeadObject(r.Context(), b.BucketName, key); err != nil {
+	s3 := h.client(r)
+	if s3 == nil {
+		return "", 0, errors.New("storage error")
+	}
+	if _, err := s3.HeadObject(r.Context(), b.BucketName, key); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			return "", 0, notFound("Object not found")
 		}
 		return "", 0, errors.New("storage error")
 	}
-	url, expires, err := h.s3.PresignGet(r.Context(), b.BucketName, key)
+	url, expires, err := s3.PresignGet(r.Context(), b.BucketName, key)
 	if err != nil {
 		return "", 0, errors.New("storage error")
 	}
@@ -131,13 +142,17 @@ func (h *Handler) presignKey(r *http.Request, user *auth.User, bucketName, key s
 			return "", 0, statusError{http.StatusForbidden, "Permission denied"}
 		}
 	}
-	if _, err := h.s3.HeadObject(r.Context(), bucketName, key); err != nil {
+	s3 := h.client(r)
+	if s3 == nil {
+		return "", 0, errors.New("storage error")
+	}
+	if _, err := s3.HeadObject(r.Context(), bucketName, key); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			return "", 0, notFound("Object not found")
 		}
 		return "", 0, errors.New("storage error")
 	}
-	url, expires, err := h.s3.PresignGet(r.Context(), bucketName, key)
+	url, expires, err := s3.PresignGet(r.Context(), bucketName, key)
 	if err != nil {
 		return "", 0, errors.New("storage error")
 	}

@@ -12,21 +12,28 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
 type Handler struct {
-	store   *Store
-	buckets *bucket.Store
-	s3      *storage.Client
-	protect func(auth.UserHandler) http.HandlerFunc
-	ac      *rbac.Checker
-	log     *audit.Logger
+	store    *Store
+	buckets  *bucket.Store
+	s3       *storage.Client
+	s3fb     storage.Config
+	settings *platform.Store
+	protect  func(auth.UserHandler) http.HandlerFunc
+	ac       *rbac.Checker
+	log      *audit.Logger
 }
 
-func NewHandler(store *Store, buckets *bucket.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger) *Handler {
-	return &Handler{store: store, buckets: buckets, s3: s3, protect: protect, ac: ac, log: log}
+func NewHandler(store *Store, buckets *bucket.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger, settings *platform.Store, s3fb storage.Config) *Handler {
+	return &Handler{store: store, buckets: buckets, s3: s3, s3fb: s3fb, settings: settings, protect: protect, ac: ac, log: log}
+}
+
+func (h *Handler) client(r *http.Request) *storage.Client {
+	return storage.Live(r.Context(), h.s3fb, h.settings, h.s3)
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -70,7 +77,8 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusServiceUnavailable, "database is not configured")
 		return
 	}
-	if h.s3 == nil {
+	s3 := h.client(r)
+	if s3 == nil {
 		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
 		return
 	}
@@ -127,7 +135,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, user *auth.User
 	if !ok {
 		return
 	}
-	if _, err := h.s3.HeadObject(r.Context(), b.BucketName, req.ObjectKey); err != nil {
+	if _, err := s3.HeadObject(r.Context(), b.BucketName, req.ObjectKey); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			httpx.Error(w, http.StatusNotFound, "Object not found")
 			return
@@ -231,7 +239,8 @@ func (h *Handler) access(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusServiceUnavailable, "database is not configured")
 		return
 	}
-	if h.s3 == nil {
+	s3 := h.client(r)
+	if s3 == nil {
 		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
 		return
 	}
@@ -269,7 +278,7 @@ func (h *Handler) access(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusForbidden, "Download and preview are disabled for this share")
 		return
 	}
-	if _, err := h.s3.HeadObject(r.Context(), link.BucketName, link.ObjectKey); err != nil {
+	if _, err := s3.HeadObject(r.Context(), link.BucketName, link.ObjectKey); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			httpx.Error(w, http.StatusNotFound, "Object not found")
 			return
@@ -277,14 +286,14 @@ func (h *Handler) access(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
-	ttl := presignTTL(link.ExpiresAt, now, h.s3.DownloadTTL())
+	ttl := presignTTL(link.ExpiresAt, now, s3.DownloadTTL())
 	if ttl < time.Second {
 		httpx.Error(w, http.StatusGone, "Share link has expired")
 		return
 	}
 	var downloadURL, previewURL *string
 	if link.AllowDownload {
-		url, _, err := h.s3.PresignGetFor(r.Context(), link.BucketName, link.ObjectKey, ttl)
+		url, _, err := s3.PresignGetFor(r.Context(), link.BucketName, link.ObjectKey, ttl)
 		if err != nil {
 			httpx.Error(w, http.StatusBadGateway, "storage error")
 			return
@@ -292,7 +301,7 @@ func (h *Handler) access(w http.ResponseWriter, r *http.Request) {
 		downloadURL = &url
 	}
 	if link.AllowPreview {
-		url, _, err := h.s3.PresignPreviewFor(r.Context(), link.BucketName, link.ObjectKey, ttl)
+		url, _, err := s3.PresignPreviewFor(r.Context(), link.BucketName, link.ObjectKey, ttl)
 		if err != nil {
 			httpx.Error(w, http.StatusBadGateway, "storage error")
 			return

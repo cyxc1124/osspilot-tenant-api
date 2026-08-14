@@ -6,24 +6,42 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/cyxc1124/osspilot-tenant-api/internal/audit"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
 type Handler struct {
-	store   *Store
-	buckets *bucket.Store
-	s3      *storage.Client
-	protect func(auth.UserHandler) http.HandlerFunc
-	ac      *rbac.Checker
+	store    *Store
+	buckets  *bucket.Store
+	s3       *storage.Client
+	s3fb     storage.Config
+	settings *platform.Store
+	protect  func(auth.UserHandler) http.HandlerFunc
+	ac       *rbac.Checker
+	log      *audit.Logger
 }
 
-func NewHandler(store *Store, buckets *bucket.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker) *Handler {
-	return &Handler{store: store, buckets: buckets, s3: s3, protect: protect, ac: ac}
+func NewHandler(store *Store, buckets *bucket.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger, settings *platform.Store, s3fb storage.Config) *Handler {
+	return &Handler{store: store, buckets: buckets, s3: s3, s3fb: s3fb, settings: settings, protect: protect, ac: ac, log: log}
+}
+
+func (h *Handler) client(r *http.Request) *storage.Client {
+	return storage.Live(r.Context(), h.s3fb, h.settings, h.s3)
+}
+
+func (h *Handler) live(w http.ResponseWriter, r *http.Request) *storage.Client {
+	s3 := h.client(r)
+	if s3 == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
+		return nil
+	}
+	return s3
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -94,10 +112,11 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request, user *auth.Us
 	if v == nil {
 		return
 	}
-	if !h.requireS3(w) {
+	s3 := h.live(w, r)
+	if s3 == nil {
 		return
 	}
-	if _, err := h.s3.HeadObject(r.Context(), v.BucketName, v.StorageKey); err != nil {
+	if _, err := s3.HeadObject(r.Context(), v.BucketName, v.StorageKey); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			httpx.Error(w, http.StatusNotFound, "Version object not found in storage")
 			return
@@ -105,11 +124,12 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request, user *auth.Us
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
-	url, expires, err := h.s3.PresignGet(r.Context(), v.BucketName, v.StorageKey)
+	url, expires, err := s3.PresignGet(r.Context(), v.BucketName, v.StorageKey)
 	if err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
+	h.log.Record(r, user, v.BucketName, v.ObjectKey, "version_download", "success", "")
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"download_url": url,
 		"expires_in":   expires,
@@ -122,11 +142,12 @@ func (h *Handler) restore(w http.ResponseWriter, r *http.Request, user *auth.Use
 	if v == nil {
 		return
 	}
-	if !h.requireS3(w) {
+	s3 := h.live(w, r)
+	if s3 == nil {
 		return
 	}
 	// ponytail: file locks wait for T10.
-	if _, err := h.s3.HeadObject(r.Context(), v.BucketName, v.StorageKey); err != nil {
+	if _, err := s3.HeadObject(r.Context(), v.BucketName, v.StorageKey); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			httpx.Error(w, http.StatusNotFound, "Version object not found in storage")
 			return
@@ -134,9 +155,9 @@ func (h *Handler) restore(w http.ResponseWriter, r *http.Request, user *auth.Use
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
-	_, err := h.s3.HeadObject(r.Context(), v.BucketName, v.ObjectKey)
+	_, err := s3.HeadObject(r.Context(), v.BucketName, v.ObjectKey)
 	if err == nil {
-		if err := h.archive(r, user.ID, v.BucketName, v.ObjectKey, sourceRestore, "Auto-archived before restoring v"+strconv.Itoa(v.VersionNo)); err != nil {
+		if err := h.archive(r, s3, user.ID, v.BucketName, v.ObjectKey, sourceRestore, "Auto-archived before restoring v"+strconv.Itoa(v.VersionNo)); err != nil {
 			h.writeArchiveErr(w, err)
 			return
 		}
@@ -144,11 +165,12 @@ func (h *Handler) restore(w http.ResponseWriter, r *http.Request, user *auth.Use
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
-	etag, err := h.s3.CopyObject(r.Context(), v.BucketName, v.ObjectKey, v.BucketName, v.StorageKey)
+	etag, err := s3.CopyObject(r.Context(), v.BucketName, v.ObjectKey, v.BucketName, v.StorageKey)
 	if err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
+	h.log.Record(r, user, v.BucketName, v.ObjectKey, "version_restore", "success", "")
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"restored":    true,
 		"bucket_name": v.BucketName,
@@ -163,10 +185,11 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request, user *auth.User
 	if v == nil {
 		return
 	}
-	if !h.requireS3(w) {
+	s3 := h.live(w, r)
+	if s3 == nil {
 		return
 	}
-	if err := h.s3.DeleteObject(r.Context(), v.BucketName, v.StorageKey); err != nil {
+	if err := s3.DeleteObject(r.Context(), v.BucketName, v.StorageKey); err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
@@ -174,15 +197,16 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
+	h.log.Record(r, user, v.BucketName, v.ObjectKey, "version_delete", "success", "")
 	httpx.JSON(w, http.StatusOK, map[string]any{"deleted": true, "id": v.ID})
 }
 
-func (h *Handler) archive(r *http.Request, userID int64, bucketName, objectKey, source, remark string) error {
+func (h *Handler) archive(r *http.Request, s3 *storage.Client, userID int64, bucketName, objectKey, source, remark string) error {
 	var rem *string
 	if remark != "" {
 		rem = &remark
 	}
-	_, err := Archive(r.Context(), h.s3, h.store, userID, bucketName, objectKey, source, rem)
+	_, err := Archive(r.Context(), s3, h.store, userID, bucketName, objectKey, source, rem)
 	return err
 }
 
@@ -222,14 +246,6 @@ func (h *Handler) visible(w http.ResponseWriter, r *http.Request, user *auth.Use
 		return false
 	}
 	return !h.ac.Forbidden(w, r, user, b.BucketName, "", rbac.ActionRead)
-}
-
-func (h *Handler) requireS3(w http.ResponseWriter) bool {
-	if h.s3 == nil {
-		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
-		return false
-	}
-	return true
 }
 
 func (h *Handler) writeArchiveErr(w http.ResponseWriter, err error) {

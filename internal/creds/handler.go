@@ -11,6 +11,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/quota"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
@@ -18,22 +19,28 @@ import (
 )
 
 type Handler struct {
-	store   *Store
-	protect func(auth.UserHandler) http.HandlerFunc
-	ac      *rbac.Checker
-	s3End   string
-	s3Reg   string
-	secret  string
-	buckets *bucket.Store
-	objects *objects.Store
-	uploads *uploads.Store
-	s3      *storage.Client
-	log     *audit.Logger
-	quota   *quota.Checker
+	store    *Store
+	protect  func(auth.UserHandler) http.HandlerFunc
+	ac       *rbac.Checker
+	s3End    string
+	s3Reg    string
+	secret   string
+	buckets  *bucket.Store
+	objects  *objects.Store
+	uploads  *uploads.Store
+	s3       *storage.Client
+	s3fb     storage.Config
+	settings *platform.Store
+	log      *audit.Logger
+	quota    *quota.Checker
 }
 
-func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, s3Endpoint, s3Region, jwtSecret string, buckets *bucket.Store, objectStore *objects.Store, uploadStore *uploads.Store, s3 *storage.Client, log *audit.Logger, q *quota.Checker) *Handler {
-	return &Handler{store: store, protect: protect, ac: ac, s3End: s3Endpoint, s3Reg: s3Region, secret: jwtSecret, buckets: buckets, objects: objectStore, uploads: uploadStore, s3: s3, log: log, quota: q}
+func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, s3Endpoint, s3Region, jwtSecret string, buckets *bucket.Store, objectStore *objects.Store, uploadStore *uploads.Store, s3 *storage.Client, log *audit.Logger, q *quota.Checker, settings *platform.Store, s3fb storage.Config) *Handler {
+	return &Handler{store: store, protect: protect, ac: ac, s3End: s3Endpoint, s3Reg: s3Region, secret: jwtSecret, buckets: buckets, objects: objectStore, uploads: uploadStore, s3: s3, s3fb: s3fb, settings: settings, log: log, quota: q}
+}
+
+func (h *Handler) client(r *http.Request) *storage.Client {
+	return storage.Live(r.Context(), h.s3fb, h.settings, h.s3)
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {

@@ -51,6 +51,7 @@ type Filter struct {
 var adminActions = []string{
 	"user_create", "user_delete", "user_update", "modify_user_role",
 	"bucket_create", "bucket_delete", "modify_bucket",
+	"modify_bucket_quota", "modify_access_logging", "modify_bucket_policy", "modify_bucket_cors",
 	"request_tenant_api_access", "create_application", "update_application", "delete_application",
 	"create_access_key", "disable_access_key", "issue_sts_credentials",
 }

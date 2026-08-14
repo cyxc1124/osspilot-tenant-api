@@ -10,24 +10,44 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/quota"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/rbac"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
 type Handler struct {
-	s3      *storage.Client
-	buckets *bucket.Store
-	objects *objects.Store
-	tasks   *Store
-	protect func(auth.UserHandler) http.HandlerFunc
-	ac      *rbac.Checker
-	log     *audit.Logger
-	quota   *quota.Checker
+	s3       *storage.Client
+	s3fb     storage.Config
+	settings *platform.Store
+	buckets  *bucket.Store
+	objects  *objects.Store
+	tasks    *Store
+	protect  func(auth.UserHandler) http.HandlerFunc
+	ac       *rbac.Checker
+	log      *audit.Logger
+	quota    *quota.Checker
 }
 
-func NewHandler(s3 *storage.Client, buckets *bucket.Store, objects *objects.Store, tasks *Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger, q *quota.Checker) *Handler {
-	return &Handler{s3: s3, buckets: buckets, objects: objects, tasks: tasks, protect: protect, ac: ac, log: log, quota: q}
+func NewHandler(s3 *storage.Client, buckets *bucket.Store, objects *objects.Store, tasks *Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger, q *quota.Checker, settings *platform.Store, s3fb storage.Config) *Handler {
+	return &Handler{s3: s3, s3fb: s3fb, settings: settings, buckets: buckets, objects: objects, tasks: tasks, protect: protect, ac: ac, log: log, quota: q}
+}
+
+func (h *Handler) client(r *http.Request) *storage.Client {
+	return storage.Live(r.Context(), h.s3fb, h.settings, h.s3)
+}
+
+func (h *Handler) live(w http.ResponseWriter, r *http.Request) *storage.Client {
+	if h.tasks == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
+		return nil
+	}
+	s3 := h.client(r)
+	if s3 == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
+		return nil
+	}
+	return s3
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -86,7 +106,8 @@ type mpAbortReq struct {
 }
 
 func (h *Handler) presign(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	if !h.ready(w) {
+	s3 := h.live(w, r)
+	if s3 == nil {
 		return
 	}
 	var req presignReq
@@ -98,7 +119,7 @@ func (h *Handler) presign(w http.ResponseWriter, r *http.Request, user *auth.Use
 	if !ok {
 		return
 	}
-	url, expires, err := h.s3.PresignPut(r.Context(), b.BucketName, req.ObjectKey, ct)
+	url, expires, err := s3.PresignPut(r.Context(), b.BucketName, req.ObjectKey, ct)
 	if err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
@@ -118,7 +139,7 @@ func (h *Handler) presign(w http.ResponseWriter, r *http.Request, user *auth.Use
 }
 
 func (h *Handler) complete(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	if !h.ready(w) {
+	if h.live(w, r) == nil {
 		return
 	}
 	var req completeReq
@@ -130,7 +151,8 @@ func (h *Handler) complete(w http.ResponseWriter, r *http.Request, user *auth.Us
 }
 
 func (h *Handler) mpInit(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	if !h.ready(w) {
+	s3 := h.live(w, r)
+	if s3 == nil {
 		return
 	}
 	var req mpInitReq
@@ -142,13 +164,13 @@ func (h *Handler) mpInit(w http.ResponseWriter, r *http.Request, user *auth.User
 	if !ok {
 		return
 	}
-	uploadID, err := h.s3.CreateMultipart(r.Context(), b.BucketName, req.ObjectKey, ct)
+	uploadID, err := s3.CreateMultipart(r.Context(), b.BucketName, req.ObjectKey, ct)
 	if err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
 	}
 	task := &Task{UserID: user.ID, BucketName: b.BucketName, ObjectKey: req.ObjectKey, UploadType: TypeMultipart, UploadID: &uploadID, Size: &req.Size, ContentType: req.ContentType}
-	if err := h.tasks.Insert(r.Context(), task, time.Now().Add(time.Duration(h.s3.UploadTTLSeconds())*time.Second)); err != nil {
+	if err := h.tasks.Insert(r.Context(), task, time.Now().Add(time.Duration(s3.UploadTTLSeconds())*time.Second)); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
@@ -156,7 +178,8 @@ func (h *Handler) mpInit(w http.ResponseWriter, r *http.Request, user *auth.User
 }
 
 func (h *Handler) mpParts(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	if !h.ready(w) {
+	s3 := h.live(w, r)
+	if s3 == nil {
 		return
 	}
 	var req mpPartsReq
@@ -185,18 +208,19 @@ func (h *Handler) mpParts(w http.ResponseWriter, r *http.Request, user *auth.Use
 			httpx.Error(w, http.StatusBadRequest, "Invalid part number")
 			return
 		}
-		url, err := h.s3.PresignUploadPart(r.Context(), req.BucketName, req.ObjectKey, req.UploadID, n)
+		url, err := s3.PresignUploadPart(r.Context(), req.BucketName, req.ObjectKey, req.UploadID, n)
 		if err != nil {
 			httpx.Error(w, http.StatusBadGateway, "storage error")
 			return
 		}
 		parts = append(parts, map[string]any{"part_number": n, "url": url})
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"parts": parts, "expires_in": h.s3.UploadTTLSeconds()})
+	httpx.JSON(w, http.StatusOK, map[string]any{"parts": parts, "expires_in": s3.UploadTTLSeconds()})
 }
 
 func (h *Handler) mpComplete(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	if !h.ready(w) {
+	s3 := h.live(w, r)
+	if s3 == nil {
 		return
 	}
 	var req mpCompleteReq
@@ -209,12 +233,13 @@ func (h *Handler) mpComplete(w http.ResponseWriter, r *http.Request, user *auth.
 		completed = append(completed, storage.CompletedPart{PartNumber: p.PartNumber, ETag: p.ETag})
 	}
 	h.finalize(w, r, user, req.BucketName, req.ObjectKey, req.TaskID, TypeMultipart, func() error {
-		return h.s3.CompleteMultipart(r.Context(), req.BucketName, req.ObjectKey, req.UploadID, completed)
+		return s3.CompleteMultipart(r.Context(), req.BucketName, req.ObjectKey, req.UploadID, completed)
 	})
 }
 
 func (h *Handler) mpAbort(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	if !h.ready(w) {
+	s3 := h.live(w, r)
+	if s3 == nil {
 		return
 	}
 	var req mpAbortReq
@@ -226,7 +251,7 @@ func (h *Handler) mpAbort(w http.ResponseWriter, r *http.Request, user *auth.Use
 	if !ok {
 		return
 	}
-	_ = h.s3.AbortMultipart(r.Context(), req.BucketName, req.ObjectKey, req.UploadID)
+	_ = s3.AbortMultipart(r.Context(), req.BucketName, req.ObjectKey, req.UploadID)
 	_ = h.tasks.Finish(r.Context(), task.ID, StatusAbort, time.Now())
 	httpx.JSON(w, http.StatusOK, map[string]any{"task_id": task.ID, "status": StatusAbort})
 }
@@ -250,7 +275,12 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request, user *auth.Us
 			return
 		}
 	}
-	meta, err := h.s3.HeadObject(r.Context(), b.BucketName, key)
+	s3 := h.client(r)
+	if s3 == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
+		return
+	}
+	meta, err := s3.HeadObject(r.Context(), b.BucketName, key)
 	if errors.Is(err, storage.ErrNotFound) {
 		httpx.Error(w, http.StatusNotFound, "Uploaded object not found in storage")
 		return
@@ -331,12 +361,4 @@ func (h *Handler) pending(w http.ResponseWriter, r *http.Request, userID, taskID
 		return nil, false
 	}
 	return task, true
-}
-
-func (h *Handler) ready(w http.ResponseWriter) bool {
-	if h.s3 == nil || h.tasks == nil {
-		httpx.Error(w, http.StatusServiceUnavailable, "storage is not configured")
-		return false
-	}
-	return true
 }
