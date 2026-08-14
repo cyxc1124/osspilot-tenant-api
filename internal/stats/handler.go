@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
@@ -29,6 +30,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/stats/buckets", h.protect(h.bucketStats))
 	mux.HandleFunc("GET /api/stats/traffic", h.protect(h.traffic))
 	mux.HandleFunc("GET /api/stats/buckets/requests", h.protect(h.bucketRequests))
+	mux.HandleFunc("GET /api/stats/prefixes", h.protect(h.prefixes))
 	mux.HandleFunc("GET /api/alerts/notifications", h.protect(h.alerts))
 }
 
@@ -214,6 +216,49 @@ func (h *Handler) bucketRequests(w http.ResponseWriter, r *http.Request, user *a
 		return out[i]["request_count"].(int64) > out[j]["request_count"].(int64)
 	})
 	httpx.JSON(w, http.StatusOK, map[string]any{"tenant_id": accountID, "period": period, "items": out, "collected_at": rfc3339(collected)})
+}
+
+func (h *Handler) prefixes(w http.ResponseWriter, r *http.Request, user *auth.User) {
+	accountID, ok := h.gate(w, r, user)
+	if !ok {
+		return
+	}
+	name := strings.TrimSpace(r.URL.Query().Get("bucket_name"))
+	if name == "" {
+		httpx.Error(w, http.StatusBadRequest, "bucket_name is required")
+		return
+	}
+	items, ok := h.visible(w, r, user, accountID)
+	if !ok {
+		return
+	}
+	var b *bucket.Bucket
+	for i := range items {
+		if items[i].BucketName == name {
+			b = &items[i]
+			break
+		}
+	}
+	if b == nil {
+		httpx.Error(w, http.StatusNotFound, "Bucket not found")
+		return
+	}
+	rows, err := h.buckets.PrefixUsage(r.Context(), b.ID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	out := make([]map[string]any, 0, len(rows))
+	var collected any
+	if len(rows) > 0 {
+		collected = time.Now().UTC().Format(time.RFC3339)
+	}
+	for _, p := range rows {
+		out = append(out, map[string]any{
+			"prefix": displayPrefix(p.Prefix), "used_bytes": p.UsedBytes, "object_count": p.ObjectCount,
+		})
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"bucket_name": b.BucketName, "items": out, "collected_at": collected})
 }
 
 func (h *Handler) alerts(w http.ResponseWriter, r *http.Request, user *auth.User) {

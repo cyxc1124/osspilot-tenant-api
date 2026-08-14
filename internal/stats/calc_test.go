@@ -17,6 +17,15 @@ func TestUsagePercent(t *testing.T) {
 	}
 }
 
+func TestDisplayPrefix(t *testing.T) {
+	if displayPrefix("") != "(根目录)" {
+		t.Fatal("root")
+	}
+	if displayPrefix("docs/") != "docs/" {
+		t.Fatal("docs")
+	}
+}
+
 func TestParsePeriod(t *testing.T) {
 	p, ok := parsePeriod("")
 	if !ok || p != "24h" {

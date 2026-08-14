@@ -216,6 +216,42 @@ func (s *Store) UsageByID(ctx context.Context, ids []int64) (map[int64]Usage, er
 	return out, rows.Err()
 }
 
+type PrefixUsage struct {
+	Prefix      string
+	UsedBytes   int64
+	ObjectCount int64
+}
+
+func (s *Store) PrefixUsage(ctx context.Context, bucketID int64) ([]PrefixUsage, error) {
+	// ponytail: SQL 一级前缀与 firstLevelPrefix 一致（docs/a → docs/，根文件 → ""）。桶大了再物化。
+	rows, err := s.pool.Query(ctx, `
+		SELECT CASE
+				WHEN position('/' IN object_key) = 0 THEN ''
+				ELSE left(object_key, position('/' IN object_key))
+			END AS prefix,
+			COALESCE(SUM(size), 0),
+			COUNT(*)
+		FROM object_records
+		WHERE bucket_id = $1
+			AND object_key NOT LIKE '.trash/%' AND object_key <> '.trash/'
+			AND object_key NOT LIKE '.versions/%' AND object_key <> '.versions/'
+		GROUP BY 1
+		ORDER BY 2 DESC, 1`, bucketID)
+	if err != nil {
+		return nil, fmt.Errorf("prefix usage: %w", err)
+	}
+	defer rows.Close()
+	var out []PrefixUsage
+	for rows.Next() {
+		var p PrefixUsage
+		if err := rows.Scan(&p.Prefix, &p.UsedBytes, &p.ObjectCount); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ListActive(ctx context.Context) ([]Bucket, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+bucketCols+` FROM buckets WHERE status = 'active' ORDER BY id`)
 	if err != nil {

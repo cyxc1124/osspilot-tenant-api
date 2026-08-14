@@ -810,6 +810,18 @@ paths:
       responses:
         "200":
           description: items
+  /api/stats/prefixes:
+    get:
+      summary: First-level prefix capacity within a bucket
+      parameters:
+        - in: query
+          name: bucket_name
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: items
   /api/audit-logs:
     get:
       summary: List tenant audit logs

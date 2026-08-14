@@ -24,6 +24,13 @@ func remainingBytes(quota *int64, used int64) *int64 {
 	return &n
 }
 
+func displayPrefix(prefix string) string {
+	if prefix == "" {
+		return "(根目录)"
+	}
+	return prefix
+}
+
 func parsePeriod(raw string) (string, bool) {
 	if raw == "" {
 		return "24h", true
