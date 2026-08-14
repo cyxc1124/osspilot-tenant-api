@@ -34,15 +34,16 @@ type Handler struct {
 	protect  func(auth.UserHandler) http.HandlerFunc
 	office   OfficeEnv
 	ac       *rbac.Checker
+	secret   string
 }
 
-func NewHandler(store *Store, buckets *bucket.Store, versions *versions.Store, settings *platform.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, office OfficeEnv, ac *rbac.Checker) *Handler {
+func NewHandler(store *Store, buckets *bucket.Store, versions *versions.Store, settings *platform.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, office OfficeEnv, ac *rbac.Checker, secret string) *Handler {
 	office.URL = strings.TrimRight(office.URL, "/")
 	office.PublicURL = strings.TrimRight(office.PublicURL, "/")
 	if office.PublicURL == "" {
 		office.PublicURL = "http://localhost:8000"
 	}
-	return &Handler{store: store, buckets: buckets, versions: versions, settings: settings, s3: s3, protect: protect, office: office, ac: ac}
+	return &Handler{store: store, buckets: buckets, versions: versions, settings: settings, s3: s3, protect: protect, office: office, ac: ac, secret: secret}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -61,6 +62,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/editor/callback/{session_id}", h.officeCallback)
 	mux.HandleFunc("POST /api/editor/save", h.protect(h.officeSave))
 	mux.HandleFunc("POST /api/editor/unlock", h.protect(h.officeUnlock))
+	mux.HandleFunc("POST /internal/file-locks/force-unlock", h.forceUnlockInternal)
 }
 
 type objectReq struct {

@@ -15,15 +15,16 @@ import (
 )
 
 const (
-	lockTTL        = 2 * time.Hour
-	sessionTTL     = 8 * time.Hour
-	statusActive   = "active"
-	statusClosed   = "closed"
-	statusReleased = "released"
-	editorMonaco   = "monaco"
-	editorOffice   = "onlyoffice"
-	modeEdit       = "edit"
-	modeView       = "view"
+	lockTTL             = 2 * time.Hour
+	sessionTTL          = 8 * time.Hour
+	statusActive        = "active"
+	statusClosed        = "closed"
+	statusReleased      = "released"
+	statusForceReleased = "force_released"
+	editorMonaco        = "monaco"
+	editorOffice        = "onlyoffice"
+	modeEdit            = "edit"
+	modeView            = "view"
 )
 
 var errLockTaken = errors.New("lock taken")
@@ -159,6 +160,33 @@ func (s *Store) releaseLock(ctx context.Context, id int64) error {
 		return fmt.Errorf("release lock: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) closeSessionsForObject(ctx context.Context, bucket, key string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE edit_sessions SET status = $4
+		WHERE bucket_name = $1 AND object_key = $2 AND status = $3`,
+		bucket, key, statusActive, statusClosed)
+	if err != nil {
+		return fmt.Errorf("close sessions: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ForceRelease(ctx context.Context, bucket, key string) (bool, error) {
+	lock, err := s.ActiveLock(ctx, bucket, key)
+	if err != nil {
+		return false, err
+	}
+	if lock != nil {
+		if _, err := s.pool.Exec(ctx, `UPDATE file_locks SET status = $2 WHERE id = $1`, lock.ID, statusForceReleased); err != nil {
+			return false, fmt.Errorf("force release lock: %w", err)
+		}
+	}
+	if err := s.closeSessionsForObject(ctx, bucket, key); err != nil {
+		return false, err
+	}
+	return lock != nil, nil
 }
 
 func (s *Store) InsertSession(ctx context.Context, sess *Session) error {

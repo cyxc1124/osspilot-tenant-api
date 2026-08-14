@@ -191,7 +191,7 @@ func main() {
 	shareH := share.NewHandler(shareStore, bucketStore, s3c, authH.RequireUser, ac, auditLog)
 	editH := edit.NewHandler(editStore, bucketStore, versionStore, settingsStore, s3c, authH.RequireUser, edit.OfficeEnv{
 		URL: cfg.OfficeURL, JWTSecret: cfg.OfficeJWTSecret, PublicURL: cfg.PublicURL,
-	}, ac)
+	}, ac, cfg.ProjectionSecret)
 	credsH := creds.NewHandler(credsStore, authH.RequireUser, ac, cfg.S3Endpoint, cfg.S3Region, cfg.JWTSecret, bucketStore, objectStore, uploadStore, s3c, auditLog, qc)
 	statsH := stats.NewHandler(statsStore, bucketStore, authStore, authH.RequireUser, ac)
 	auditH := audit.NewHandler(auditStore, authH.RequireUser, ac)
