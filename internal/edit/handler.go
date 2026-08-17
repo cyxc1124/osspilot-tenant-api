@@ -27,6 +27,7 @@ type OfficeEnv struct {
 
 type Handler struct {
 	store    *Store
+	users    *auth.Store
 	buckets  *bucket.Store
 	versions *versions.Store
 	settings *platform.Store
@@ -38,13 +39,13 @@ type Handler struct {
 	secret   string
 }
 
-func NewHandler(store *Store, buckets *bucket.Store, versions *versions.Store, settings *platform.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, office OfficeEnv, ac *rbac.Checker, secret string, s3fb storage.Config) *Handler {
+func NewHandler(store *Store, users *auth.Store, buckets *bucket.Store, versions *versions.Store, settings *platform.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, office OfficeEnv, ac *rbac.Checker, secret string, s3fb storage.Config) *Handler {
 	office.URL = strings.TrimRight(office.URL, "/")
 	office.PublicURL = strings.TrimRight(office.PublicURL, "/")
 	if office.PublicURL == "" {
 		office.PublicURL = "http://localhost:8000"
 	}
-	return &Handler{store: store, buckets: buckets, versions: versions, settings: settings, s3: s3, s3fb: s3fb, protect: protect, office: office, ac: ac, secret: secret}
+	return &Handler{store: store, users: users, buckets: buckets, versions: versions, settings: settings, s3: s3, s3fb: s3fb, protect: protect, office: office, ac: ac, secret: secret}
 }
 
 func (h *Handler) client(r *http.Request) *storage.Client {

@@ -19,6 +19,7 @@ import (
 
 type Handler struct {
 	store    *Store
+	users    *auth.Store
 	buckets  *bucket.Store
 	s3       *storage.Client
 	s3fb     storage.Config
@@ -28,8 +29,8 @@ type Handler struct {
 	log      *audit.Logger
 }
 
-func NewHandler(store *Store, buckets *bucket.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger, settings *platform.Store, s3fb storage.Config) *Handler {
-	return &Handler{store: store, buckets: buckets, s3: s3, s3fb: s3fb, settings: settings, protect: protect, ac: ac, log: log}
+func NewHandler(store *Store, users *auth.Store, buckets *bucket.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger, settings *platform.Store, s3fb storage.Config) *Handler {
+	return &Handler{store: store, users: users, buckets: buckets, s3: s3, s3fb: s3fb, settings: settings, protect: protect, ac: ac, log: log}
 }
 
 func (h *Handler) client(r *http.Request) *storage.Client {
@@ -257,6 +258,10 @@ func (h *Handler) access(w http.ResponseWriter, r *http.Request) {
 	if link == nil || link.Status != "active" {
 		httpx.Error(w, http.StatusNotFound, "Share link not found")
 		return
+	}
+	r = h.users.BindS3(r, link.AccountID)
+	if live := h.client(r); live != nil {
+		s3 = live
 	}
 	now := time.Now().UTC()
 	if link.ExpiresAt != nil && !link.ExpiresAt.After(now) {

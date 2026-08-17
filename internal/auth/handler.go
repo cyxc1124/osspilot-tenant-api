@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
 type auditor interface {
@@ -202,6 +203,7 @@ func (h *Handler) RequireUser(next UserHandler) http.HandlerFunc {
 			httpx.Error(w, http.StatusForbidden, "password change required")
 			return
 		}
+		r = r.WithContext(storage.WithAccountS3(r.Context(), user.S3Endpoint, user.S3RegionName))
 		next(w, r, user)
 	}
 }

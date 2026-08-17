@@ -201,11 +201,11 @@ func main() {
 		lock, err := editStore.ActiveLock(ctx, bucket, key)
 		return lock != nil, err
 	})
-	shareH := share.NewHandler(shareStore, bucketStore, s3c, authH.RequireUser, ac, auditLog, settingsStore, s3cfg)
-	editH := edit.NewHandler(editStore, bucketStore, versionStore, settingsStore, s3c, authH.RequireUser, edit.OfficeEnv{
+	shareH := share.NewHandler(shareStore, authStore, bucketStore, s3c, authH.RequireUser, ac, auditLog, settingsStore, s3cfg)
+	editH := edit.NewHandler(editStore, authStore, bucketStore, versionStore, settingsStore, s3c, authH.RequireUser, edit.OfficeEnv{
 		URL: cfg.OfficeURL, JWTSecret: cfg.OfficeJWTSecret, PublicURL: cfg.PublicURL,
 	}, ac, cfg.ProjectionSecret, s3cfg)
-	credsH := creds.NewHandler(credsStore, authH.RequireUser, ac, cfg.S3Endpoint, cfg.S3Region, cfg.JWTSecret, bucketStore, objectStore, uploadStore, s3c, auditLog, qc, settingsStore, s3cfg)
+	credsH := creds.NewHandler(credsStore, authStore, authH.RequireUser, ac, cfg.S3Endpoint, cfg.S3Region, cfg.JWTSecret, bucketStore, objectStore, uploadStore, s3c, auditLog, qc, settingsStore, s3cfg)
 	statsH := stats.NewHandler(statsStore, bucketStore, authStore, authH.RequireUser, ac)
 	auditH := audit.NewHandler(auditStore, authH.RequireUser, ac, cfg.ProjectionSecret)
 	var usageH *stats.InternalHandler

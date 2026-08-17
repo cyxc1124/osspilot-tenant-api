@@ -40,6 +40,9 @@ func Overlay(cfg Config, rows map[string]string) Config {
 	if v := strings.TrimSpace(rows["s3_endpoint"]); v != "" {
 		cfg.Endpoint = v
 	}
+	if v := strings.TrimSpace(rows["s3_region_name"]); v != "" {
+		cfg.Region = v
+	}
 	if v := strings.TrimSpace(rows["rgw_access_key"]); v != "" {
 		cfg.AccessKey = v
 	}
@@ -62,6 +65,35 @@ type SettingsMap interface {
 	Map(ctx context.Context) (map[string]string, error)
 }
 
+type accountS3Key struct{}
+
+type accountS3 struct {
+	Endpoint string
+	Region   string
+}
+
+func WithAccountS3(ctx context.Context, endpoint, region string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	endpoint, region = strings.TrimSpace(endpoint), strings.TrimSpace(region)
+	if endpoint == "" && region == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, accountS3Key{}, accountS3{Endpoint: endpoint, Region: region})
+}
+
+func applyAccountS3(ctx context.Context, cfg Config) Config {
+	if ctx == nil {
+		return cfg
+	}
+	v, ok := ctx.Value(accountS3Key{}).(accountS3)
+	if !ok {
+		return cfg
+	}
+	return Overlay(cfg, map[string]string{"s3_endpoint": v.Endpoint, "s3_region_name": v.Region})
+}
+
 func Live(ctx context.Context, fb Config, settings SettingsMap, fallback *Client) *Client {
 	cfg := fb
 	if settings != nil {
@@ -69,6 +101,7 @@ func Live(ctx context.Context, fb Config, settings SettingsMap, fallback *Client
 			cfg = Overlay(cfg, rows)
 		}
 	}
+	cfg = applyAccountS3(ctx, cfg)
 	if cfg.Ready() {
 		return New(cfg)
 	}

@@ -68,10 +68,23 @@ func (h *Handler) config(w http.ResponseWriter, r *http.Request, user *auth.User
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
+	region := regionFrom(rows)
+	endpoint := pickPtr(rows, "s3_endpoint", h.fallbacks.S3Endpoint)
+	if user != nil && user.StorageRegionCode != "" {
+		id := int64(0)
+		if user.StorageRegionID != nil {
+			id = *user.StorageRegionID
+		}
+		region = &Region{ID: id, Code: user.StorageRegionCode, Name: user.StorageRegionName, S3Endpoint: user.S3Endpoint}
+		if user.S3Endpoint != "" {
+			ep := user.S3Endpoint
+			endpoint = &ep
+		}
+	}
 	httpx.JSON(w, http.StatusOK, configResponse{
 		TenantID:            auth.AccountID(user),
-		StorageRegion:       regionFrom(rows),
-		S3Endpoint:          pickPtr(rows, "s3_endpoint", h.fallbacks.S3Endpoint),
+		StorageRegion:       region,
+		S3Endpoint:          endpoint,
 		DownloadCDNURL:      pickPtr(rows, "download_cdn_url", h.fallbacks.DownloadCDNURL),
 		PreviewCDNURL:       pickPtr(rows, "preview_cdn_url", h.fallbacks.PreviewCDNURL),
 		ObjectHTTPDomain:    pickPtr(rows, "object_http_domain", h.fallbacks.ObjectHTTPDomain),
