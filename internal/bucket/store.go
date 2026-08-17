@@ -87,6 +87,14 @@ func (s *Store) VisibleID(ctx context.Context, accountID int64, name string) (*i
 	return &b.ID, nil
 }
 
+func (s *Store) Owner(ctx context.Context, accountID int64, name string) (*int64, error) {
+	b, err := s.GetVisible(ctx, accountID, name)
+	if err != nil || b == nil {
+		return nil, err
+	}
+	return b.CreatedBy, nil
+}
+
 func (s *Store) GrantLocal(ctx context.Context, userID, bucketID int64) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO account_bucket_grants (user_id, bucket_id, local) VALUES ($1,$2,true)

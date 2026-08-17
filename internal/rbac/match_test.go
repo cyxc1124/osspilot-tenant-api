@@ -50,6 +50,26 @@ func TestAllowedSubjects(t *testing.T) {
 	}
 }
 
+func TestCreatorPrivilege(t *testing.T) {
+	uid := int64(5)
+	rules := []Rule{{UserID: &uid, Actions: []string{ActionRead, ActionBucketCreate}}}
+	own := i64p(uid)
+	other := i64p(9)
+	if !CreatorAllows(uid, "normal_user", nil, own, rules) {
+		t.Fatal("creator should own their bucket")
+	}
+	if CreatorAllows(uid, "normal_user", nil, other, rules) {
+		t.Fatal("creator should not own others")
+	}
+	if !CreatorScopedList(uid, "normal_user", nil, rules) {
+		t.Fatal("read+create should scope list")
+	}
+	readOnly := []Rule{{UserID: &uid, Actions: []string{ActionRead}}}
+	if CreatorScopedList(uid, "normal_user", nil, readOnly) {
+		t.Fatal("read without create is not scoped")
+	}
+}
+
 func TestValidateActions(t *testing.T) {
 	if ValidateActions(nil) == "" {
 		t.Fatal("empty actions")

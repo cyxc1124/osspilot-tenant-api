@@ -70,8 +70,19 @@ func (h *Handler) visible(w http.ResponseWriter, r *http.Request, user *auth.Use
 	if auth.IsAdmin(user) || h.ac == nil {
 		return items, true
 	}
+	ownOnly, err := h.ac.ScopeOwnBuckets(r.Context(), user)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return nil, false
+	}
 	out := make([]bucket.Bucket, 0, len(items))
 	for _, b := range items {
+		if ownOnly {
+			if b.CreatedBy != nil && *b.CreatedBy == user.ID {
+				out = append(out, b)
+			}
+			continue
+		}
 		ok, err := h.ac.Allow(r.Context(), user, b.BucketName, "", rbac.ActionRead)
 		if err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "database error")
