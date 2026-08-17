@@ -108,9 +108,10 @@ func (h *Handler) account(w http.ResponseWriter, r *http.Request, user *auth.Use
 		verB += u.VersionBytes
 		verN += u.VersionCount
 	}
-	var collected any
-	if len(items) > 0 {
-		collected = time.Now().UTC().Format(time.RFC3339)
+	collectedAt, err := h.buckets.LatestInventoriedAt(r.Context(), ids)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
 	}
 	var quota *int64
 	if h.users != nil {
@@ -128,7 +129,7 @@ func (h *Handler) account(w http.ResponseWriter, r *http.Request, user *auth.Use
 		"remaining_bytes": remainingBytes(quota, used), "object_count": count,
 		"trash_bytes": trashB, "trash_object_count": trashN,
 		"version_bytes": verB, "version_object_count": verN,
-		"usage_percent": usagePercent(used, quota), "collected_at": collected,
+		"usage_percent": usagePercent(used, quota), "collected_at": rfc3339(collectedAt),
 	})
 }
 
@@ -147,9 +148,10 @@ func (h *Handler) bucketStats(w http.ResponseWriter, r *http.Request, user *auth
 		return
 	}
 	out := make([]map[string]any, 0, len(items))
-	var collected any
-	if len(items) > 0 {
-		collected = time.Now().UTC().Format(time.RFC3339)
+	collectedAt, err := h.buckets.LatestInventoriedAt(r.Context(), idsOf(items))
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
 	}
 	for _, b := range items {
 		u := usage[b.ID]
@@ -161,7 +163,7 @@ func (h *Handler) bucketStats(w http.ResponseWriter, r *http.Request, user *auth
 			"usage_percent": usagePercent(u.UsedBytes, b.QuotaBytes),
 		})
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": out, "collected_at": collected})
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": out, "collected_at": rfc3339(collectedAt)})
 }
 
 func (h *Handler) traffic(w http.ResponseWriter, r *http.Request, user *auth.User) {

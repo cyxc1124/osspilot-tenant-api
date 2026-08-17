@@ -309,6 +309,17 @@ func (s *Store) ListActive(ctx context.Context) ([]Bucket, error) {
 	return out, rows.Err()
 }
 
+func (s *Store) LatestInventoriedAt(ctx context.Context, ids []int64) (*time.Time, error) {
+	if s == nil || s.pool == nil || len(ids) == 0 {
+		return nil, nil
+	}
+	var at *time.Time
+	if err := s.pool.QueryRow(ctx, `SELECT MAX(inventoried_at) FROM buckets WHERE id = ANY($1)`, ids).Scan(&at); err != nil {
+		return nil, fmt.Errorf("latest inventoried: %w", err)
+	}
+	return at, nil
+}
+
 func (s *Store) MarkInventoried(ctx context.Context, id int64, at time.Time) error {
 	if s == nil || s.pool == nil {
 		return nil
