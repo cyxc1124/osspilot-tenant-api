@@ -172,7 +172,7 @@ func main() {
 		slog.Warn("S3_ENDPOINT/RGW_ACCESS_KEY/RGW_SECRET_KEY unset; upload/download return 503")
 	}
 
-	authH := auth.NewHandler(authStore, cfg.JWTSecret, cfg.TokenTTL)
+	authH := auth.NewHandler(authStore, cfg.JWTSecret, cfg.TokenTTL, auditLog)
 	rbacH := rbac.NewHandler(authStore, rbacStore, bucketStore, authH.RequireUser, auditLog, cfg.ProjectionSecret)
 	ac := rbacH.Checker()
 	q := queue.New(cfg.RedisURL)
