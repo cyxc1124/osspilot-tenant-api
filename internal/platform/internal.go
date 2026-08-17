@@ -31,6 +31,7 @@ var projectable = map[string]struct{}{
 	"rgw_access_key":            {},
 	"rgw_secret_key":            {},
 	"max_upload_bytes":          {},
+	"office_url":                {},
 }
 
 func (h *Handler) registerInternal(mux *http.ServeMux) {
