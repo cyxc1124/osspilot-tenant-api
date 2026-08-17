@@ -30,6 +30,7 @@ var projectable = map[string]struct{}{
 	"s3_endpoint":               {},
 	"rgw_access_key":            {},
 	"rgw_secret_key":            {},
+	"max_upload_bytes":          {},
 }
 
 func (h *Handler) registerInternal(mux *http.ServeMux) {
