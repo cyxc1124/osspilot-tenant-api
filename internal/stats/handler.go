@@ -34,12 +34,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/alerts/notifications", h.protect(h.alerts))
 }
 
-func (h *Handler) gate(w http.ResponseWriter, r *http.Request, user *auth.User) (int64, bool) {
+func (h *Handler) accountID(w http.ResponseWriter, r *http.Request, user *auth.User) (int64, bool) {
 	if h.buckets == nil {
 		httpx.Error(w, http.StatusServiceUnavailable, "database is not configured")
-		return 0, false
-	}
-	if h.ac.Forbidden(w, r, user, "", "", rbac.ActionRead) {
 		return 0, false
 	}
 	id := auth.AccountID(user)
@@ -49,6 +46,17 @@ func (h *Handler) gate(w http.ResponseWriter, r *http.Request, user *auth.User) 
 			httpx.Error(w, http.StatusForbidden, "Tenant access denied")
 			return 0, false
 		}
+	}
+	return id, true
+}
+
+func (h *Handler) gate(w http.ResponseWriter, r *http.Request, user *auth.User) (int64, bool) {
+	id, ok := h.accountID(w, r, user)
+	if !ok {
+		return 0, false
+	}
+	if h.ac.Forbidden(w, r, user, "", "", rbac.ActionRead) {
+		return 0, false
 	}
 	return id, true
 }
@@ -262,7 +270,7 @@ func (h *Handler) prefixes(w http.ResponseWriter, r *http.Request, user *auth.Us
 }
 
 func (h *Handler) alerts(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	accountID, ok := h.gate(w, r, user)
+	accountID, ok := h.accountID(w, r, user)
 	if !ok {
 		return
 	}
