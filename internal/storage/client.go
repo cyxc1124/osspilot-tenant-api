@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,6 +51,9 @@ func Overlay(cfg Config, rows map[string]string) Config {
 	}
 	if v := strings.TrimSpace(rows["preview_cdn_url"]); v != "" {
 		cfg.PreviewCDNURL = v
+	}
+	if n, err := strconv.Atoi(strings.TrimSpace(rows["default_upload_presign_expires"])); err == nil && n >= 600 && n <= 1800 {
+		cfg.UploadTTL = time.Duration(n) * time.Second
 	}
 	return cfg
 }
