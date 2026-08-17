@@ -3,11 +3,13 @@ package quota
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 )
 
 type dailyStore interface {
@@ -15,17 +17,18 @@ type dailyStore interface {
 }
 
 type Checker struct {
-	users   *auth.Store
-	buckets *bucket.Store
-	objects *objects.Store
-	daily   dailyStore
+	users    *auth.Store
+	buckets  *bucket.Store
+	objects  *objects.Store
+	daily    dailyStore
+	settings *platform.Store
 }
 
-func New(users *auth.Store, buckets *bucket.Store, objects *objects.Store, daily dailyStore) *Checker {
+func New(users *auth.Store, buckets *bucket.Store, objects *objects.Store, daily dailyStore, settings *platform.Store) *Checker {
 	if users == nil || buckets == nil || objects == nil || daily == nil {
 		return nil
 	}
-	return &Checker{users: users, buckets: buckets, objects: objects, daily: daily}
+	return &Checker{users: users, buckets: buckets, objects: objects, daily: daily, settings: settings}
 }
 
 func (c *Checker) Upload(ctx context.Context, accountID int64, b *bucket.Bucket, key string, size int64) error {
@@ -70,7 +73,7 @@ func (c *Checker) Upload(ctx context.Context, accountID int64, b *bucket.Bucket,
 		return err
 	}
 	in := Input{
-		Size: size, NewObject: !exists,
+		Size: size, NewObject: !exists, MaxUploadBytes: c.maxUpload(ctx),
 		AccountUsed: accountUsed, AccountCount: accountCount, AccountDaily: daily,
 		BucketUsed: bu.UsedBytes, BucketCount: bu.ObjectCount,
 		Bucket: Limits{QuotaBytes: b.QuotaBytes, ObjectLimit: b.ObjectLimit},
@@ -79,4 +82,19 @@ func (c *Checker) Upload(ctx context.Context, accountID int64, b *bucket.Bucket,
 		in.Account = Limits{QuotaBytes: acc.QuotaBytes, ObjectLimit: acc.ObjectLimit, DailyUploadBytes: acc.DailyUploadBytes}
 	}
 	return Check(in)
+}
+
+func (c *Checker) maxUpload(ctx context.Context) *int64 {
+	if c.settings == nil {
+		return nil
+	}
+	rows, err := c.settings.Map(ctx)
+	if err != nil {
+		return nil
+	}
+	n, err := strconv.ParseInt(rows["max_upload_bytes"], 10, 64)
+	if err != nil || n <= 0 {
+		return nil
+	}
+	return &n
 }

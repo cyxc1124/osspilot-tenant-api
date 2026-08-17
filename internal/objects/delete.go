@@ -54,7 +54,8 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request, user *auth.User
 		h.queueDelete(w, r, user, b.BucketName, keys, permanent, len(keys))
 		return
 	}
-	resolved, failed := ExpandDeleteKeys(r.Context(), h.s3, h.store, b, keys)
+	s3 := h.client(r.Context())
+	resolved, failed := ExpandDeleteKeys(r.Context(), s3, h.store, b, keys)
 	if shouldQueue(len(resolved)) {
 		if h.missingQueue(w, len(resolved)) {
 			return
@@ -65,7 +66,7 @@ func (h *Handler) remove(w http.ResponseWriter, r *http.Request, user *auth.User
 	deleted := make([]string, 0, len(resolved))
 	now := time.Now()
 	for _, key := range resolved {
-		if err := ApplyDelete(r.Context(), h.s3, h.store, b, user.ID, key, permanent, now); err != nil {
+		if err := ApplyDelete(r.Context(), s3, h.store, b, user.ID, key, permanent, now); err != nil {
 			failed = append(failed, opFailure{Key: key, Error: deleteErr(err)})
 			h.log.Record(r, user, b.BucketName, key, "delete", "failure", deleteErr(err))
 			continue

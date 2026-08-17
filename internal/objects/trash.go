@@ -126,31 +126,33 @@ func (h *Handler) runTrashOp(w http.ResponseWriter, r *http.Request, user *auth.
 }
 
 func (h *Handler) restoreOne(r *http.Request, userID, bucketID int64, bucketName, key string, now time.Time) error {
+	s3 := h.client(r.Context())
 	trashKey := ToTrashKey(key)
-	meta, err := h.s3.HeadObject(r.Context(), bucketName, trashKey)
+	meta, err := s3.HeadObject(r.Context(), bucketName, trashKey)
 	if err != nil {
 		return err
 	}
-	if _, err := h.s3.HeadObject(r.Context(), bucketName, key); err == nil {
+	if _, err := s3.HeadObject(r.Context(), bucketName, key); err == nil {
 		return errLiveExists
 	} else if !errors.Is(err, storage.ErrNotFound) {
 		return err
 	}
-	if _, err := h.s3.CopyObject(r.Context(), bucketName, key, bucketName, trashKey); err != nil {
+	if _, err := s3.CopyObject(r.Context(), bucketName, key, bucketName, trashKey); err != nil {
 		return err
 	}
-	if err := h.s3.DeleteObject(r.Context(), bucketName, trashKey); err != nil {
+	if err := s3.DeleteObject(r.Context(), bucketName, trashKey); err != nil {
 		return err
 	}
 	return h.store.MoveKey(r.Context(), bucketID, bucketName, trashKey, key, meta.Size, meta.ETag, meta.ContentType, userID, now)
 }
 
 func (h *Handler) purgeOne(r *http.Request, bucketID int64, bucketName, key string) error {
+	s3 := h.client(r.Context())
 	trashKey := ToTrashKey(key)
-	if _, err := h.s3.HeadObject(r.Context(), bucketName, trashKey); err != nil {
+	if _, err := s3.HeadObject(r.Context(), bucketName, trashKey); err != nil {
 		return err
 	}
-	if err := h.s3.DeleteObject(r.Context(), bucketName, trashKey); err != nil {
+	if err := s3.DeleteObject(r.Context(), bucketName, trashKey); err != nil {
 		return err
 	}
 	return h.store.Delete(r.Context(), bucketID, trashKey)

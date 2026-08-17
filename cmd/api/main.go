@@ -179,7 +179,7 @@ func main() {
 	} else {
 		slog.Warn("REDIS_URL unset; batch object ops and inventory enqueue return 503")
 	}
-	qc := quota.New(authStore, bucketStore, objectStore, uploadStore)
+	qc := quota.New(authStore, bucketStore, objectStore, uploadStore, settingsStore)
 	bucketH := bucket.NewHandler(bucketStore, authH.RequireUser, s3c, cfg.CORSOrigins, ac, auditLog, settingsStore, s3cfg)
 	objectH := objects.NewHandler(bucketStore, objectStore, s3c, authH.RequireUser, ac, auditLog, q, settingsStore, s3cfg)
 	uploadH := uploads.NewHandler(s3c, bucketStore, objectStore, uploadStore, authH.RequireUser, ac, auditLog, qc, settingsStore, s3cfg)
@@ -192,11 +192,17 @@ func main() {
 		ObjectHTTPSDomain: cfg.ObjectHTTPSDomain,
 	}, cfg.ProjectionSecret, q)
 	projectH := project.NewHandler(cfg.ProjectionSecret, authStore, bucketStore, credsStore, q, objectStore)
-	versionH := versions.NewHandler(versionStore, bucketStore, s3c, authH.RequireUser, ac, auditLog, settingsStore, s3cfg)
+	versionH := versions.NewHandler(versionStore, bucketStore, s3c, authH.RequireUser, ac, auditLog, settingsStore, s3cfg, func(ctx context.Context, bucket, key string) (bool, error) {
+		if editStore == nil {
+			return false, nil
+		}
+		lock, err := editStore.ActiveLock(ctx, bucket, key)
+		return lock != nil, err
+	})
 	shareH := share.NewHandler(shareStore, bucketStore, s3c, authH.RequireUser, ac, auditLog, settingsStore, s3cfg)
 	editH := edit.NewHandler(editStore, bucketStore, versionStore, settingsStore, s3c, authH.RequireUser, edit.OfficeEnv{
 		URL: cfg.OfficeURL, JWTSecret: cfg.OfficeJWTSecret, PublicURL: cfg.PublicURL,
-	}, ac, cfg.ProjectionSecret)
+	}, ac, cfg.ProjectionSecret, s3cfg)
 	credsH := creds.NewHandler(credsStore, authH.RequireUser, ac, cfg.S3Endpoint, cfg.S3Region, cfg.JWTSecret, bucketStore, objectStore, uploadStore, s3c, auditLog, qc, settingsStore, s3cfg)
 	statsH := stats.NewHandler(statsStore, bucketStore, authStore, authH.RequireUser, ac)
 	auditH := audit.NewHandler(auditStore, authH.RequireUser, ac, cfg.ProjectionSecret)

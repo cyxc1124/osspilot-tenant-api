@@ -62,7 +62,7 @@ func (h *Handler) officeOpen(w http.ResponseWriter, r *http.Request, user *auth.
 	if !ok {
 		return
 	}
-	if _, err := h.s3.HeadObject(r.Context(), b.BucketName, req.ObjectKey); err != nil {
+	if _, err := h.client(r).HeadObject(r.Context(), b.BucketName, req.ObjectKey); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			httpx.Error(w, http.StatusNotFound, "Object not found")
 			return
@@ -157,7 +157,7 @@ func (h *Handler) officeDownload(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "Unsupported file type")
 		return
 	}
-	body, _, err := h.s3.GetObject(r.Context(), sess.Bucket, sess.Key, 0)
+	body, _, err := h.client(r).GetObject(r.Context(), sess.Bucket, sess.Key, 0)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			httpx.Error(w, http.StatusNotFound, "Object not found")
@@ -403,7 +403,7 @@ func (h *Handler) saveFromURL(r *http.Request, sess *Session, url string) error 
 	if err != nil {
 		return err
 	}
-	etag, err := h.s3.PutObject(r.Context(), sess.Bucket, sess.Key, bytes.NewReader(body), kind.ContentType)
+	etag, err := h.client(r).PutObject(r.Context(), sess.Bucket, sess.Key, bytes.NewReader(body), kind.ContentType)
 	if err != nil {
 		return err
 	}

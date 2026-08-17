@@ -1,6 +1,7 @@
 package versions
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -25,10 +26,11 @@ type Handler struct {
 	protect  func(auth.UserHandler) http.HandlerFunc
 	ac       *rbac.Checker
 	log      *audit.Logger
+	locked   func(ctx context.Context, bucket, key string) (bool, error)
 }
 
-func NewHandler(store *Store, buckets *bucket.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger, settings *platform.Store, s3fb storage.Config) *Handler {
-	return &Handler{store: store, buckets: buckets, s3: s3, s3fb: s3fb, settings: settings, protect: protect, ac: ac, log: log}
+func NewHandler(store *Store, buckets *bucket.Store, s3 *storage.Client, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, log *audit.Logger, settings *platform.Store, s3fb storage.Config, locked func(ctx context.Context, bucket, key string) (bool, error)) *Handler {
+	return &Handler{store: store, buckets: buckets, s3: s3, s3fb: s3fb, settings: settings, protect: protect, ac: ac, log: log, locked: locked}
 }
 
 func (h *Handler) client(r *http.Request) *storage.Client {
@@ -146,7 +148,17 @@ func (h *Handler) restore(w http.ResponseWriter, r *http.Request, user *auth.Use
 	if s3 == nil {
 		return
 	}
-	// ponytail: file locks wait for T10.
+	if h.locked != nil {
+		held, err := h.locked(r.Context(), v.BucketName, v.ObjectKey)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "database error")
+			return
+		}
+		if held {
+			httpx.Error(w, http.StatusConflict, "File is locked; cannot restore while another user is editing")
+			return
+		}
+	}
 	if _, err := s3.HeadObject(r.Context(), v.BucketName, v.StorageKey); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			httpx.Error(w, http.StatusNotFound, "Version object not found in storage")

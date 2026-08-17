@@ -40,6 +40,16 @@ func TestCheckDailyAndBucket(t *testing.T) {
 	}
 }
 
+func TestCheckMaxUploadBytes(t *testing.T) {
+	n := int64(100)
+	if err := Check(Input{Size: 101, MaxUploadBytes: &n}); err == nil || err.Error() != "File size exceeds maximum allowed (100 bytes)" {
+		t.Fatalf("got %v", err)
+	}
+	if err := Check(Input{Size: 100, MaxUploadBytes: &n}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCheckNilLimitsPass(t *testing.T) {
 	if err := Check(Input{Size: 1 << 40, NewObject: true, AccountUsed: 1 << 40, BucketUsed: 1 << 40}); err != nil {
 		t.Fatal(err)

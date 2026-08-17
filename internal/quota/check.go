@@ -3,6 +3,7 @@ package quota
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
 )
@@ -20,18 +21,22 @@ type Limits struct {
 }
 
 type Input struct {
-	Size         int64
-	NewObject    bool
-	Account      Limits
-	Bucket       Limits
-	AccountUsed  int64
-	AccountCount int64
-	AccountDaily int64
-	BucketUsed   int64
-	BucketCount  int64
+	Size           int64
+	NewObject      bool
+	MaxUploadBytes *int64
+	Account        Limits
+	Bucket         Limits
+	AccountUsed    int64
+	AccountCount   int64
+	AccountDaily   int64
+	BucketUsed     int64
+	BucketCount    int64
 }
 
 func Check(in Input) error {
+	if in.MaxUploadBytes != nil && in.Size > *in.MaxUploadBytes {
+		return &Exceeded{Detail: "File size exceeds maximum allowed (" + strconv.FormatInt(*in.MaxUploadBytes, 10) + " bytes)"}
+	}
 	if overBytes(in.Account.QuotaBytes, in.AccountUsed, in.Size) {
 		return &Exceeded{Detail: "Tenant quota exceeded"}
 	}

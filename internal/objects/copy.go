@@ -91,7 +91,7 @@ func (h *Handler) copy(w http.ResponseWriter, r *http.Request, user *auth.User) 
 			failed = append(failed, map[string]string{"source_key": it.SourceKey, "error": "Invalid object key"})
 			continue
 		}
-		if err := ApplyCopy(r.Context(), h.s3, h.store, src, destBucket, user.ID, it.SourceKey, it.DestKey, now); err != nil {
+		if err := ApplyCopy(r.Context(), h.client(r.Context()), h.store, src, destBucket, user.ID, it.SourceKey, it.DestKey, now); err != nil {
 			failed = append(failed, map[string]string{"source_key": it.SourceKey, "error": CopyErr(err)})
 			h.log.Record(r, user, destBucket.BucketName, it.DestKey, "copy", "failure", CopyErr(err))
 			continue
@@ -155,7 +155,7 @@ func (h *Handler) move(w http.ResponseWriter, r *http.Request, user *auth.User) 
 		if h.ac.Forbidden(w, r, user, b.BucketName, it.DestKey, rbac.ActionWrite) {
 			return
 		}
-		if err := ApplyMove(r.Context(), h.s3, h.store, b, user.ID, it.SourceKey, it.DestKey, now); err != nil {
+		if err := ApplyMove(r.Context(), h.client(r.Context()), h.store, b, user.ID, it.SourceKey, it.DestKey, now); err != nil {
 			failed = append(failed, map[string]string{"source_key": it.SourceKey, "error": CopyErr(err)})
 			h.log.Record(r, user, b.BucketName, it.SourceKey, "move", "failure", CopyErr(err))
 			continue
@@ -190,7 +190,7 @@ func (h *Handler) rename(w http.ResponseWriter, r *http.Request, user *auth.User
 	if h.ac.Forbidden(w, r, user, b.BucketName, req.Key, rbac.ActionDelete) {
 		return
 	}
-	if err := ApplyMove(r.Context(), h.s3, h.store, b, user.ID, req.Key, dest, time.Now()); err != nil {
+	if err := ApplyMove(r.Context(), h.client(r.Context()), h.store, b, user.ID, req.Key, dest, time.Now()); err != nil {
 		msg := CopyErr(err)
 		if msg == "Object not found" {
 			httpx.Error(w, http.StatusNotFound, msg)

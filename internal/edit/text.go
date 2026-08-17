@@ -55,7 +55,7 @@ func (h *Handler) textOpen(w http.ResponseWriter, r *http.Request, user *auth.Us
 	if !ok {
 		return
 	}
-	meta, err := h.s3.HeadObject(r.Context(), b.BucketName, req.ObjectKey)
+	meta, err := h.client(r).HeadObject(r.Context(), b.BucketName, req.ObjectKey)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			httpx.Error(w, http.StatusNotFound, "Object not found")
@@ -77,7 +77,7 @@ func (h *Handler) textOpen(w http.ResponseWriter, r *http.Request, user *auth.Us
 		return
 	}
 	_ = h.store.expireSessions(r.Context(), b.BucketName, req.ObjectKey)
-	raw, _, err := h.s3.GetObject(r.Context(), b.BucketName, req.ObjectKey, maxTextBytes+1)
+	raw, _, err := h.client(r).GetObject(r.Context(), b.BucketName, req.ObjectKey, maxTextBytes+1)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			httpx.Error(w, http.StatusNotFound, "Object not found")
@@ -170,7 +170,7 @@ func (h *Handler) textSave(w http.ResponseWriter, r *http.Request, user *auth.Us
 		httpx.Error(w, http.StatusRequestEntityTooLarge, "File too large for text editing")
 		return
 	}
-	n, err := versions.Archive(r.Context(), h.s3, h.versions, user.ID, sess.Bucket, sess.Key, versions.SourceTextEdit, req.Remark)
+	n, err := versions.Archive(r.Context(), h.client(r), h.versions, user.ID, sess.Bucket, sess.Key, versions.SourceTextEdit, req.Remark)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			httpx.Error(w, http.StatusNotFound, "Object not found")
@@ -183,7 +183,7 @@ func (h *Handler) textSave(w http.ResponseWriter, r *http.Request, user *auth.Us
 	if ct == "" {
 		ct = "text/plain"
 	}
-	etag, err := h.s3.PutObject(r.Context(), sess.Bucket, sess.Key, bytes.NewReader(body), ct)
+	etag, err := h.client(r).PutObject(r.Context(), sess.Bucket, sess.Key, bytes.NewReader(body), ct)
 	if err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
@@ -224,7 +224,7 @@ func (h *Handler) textPresignSave(w http.ResponseWriter, r *http.Request, user *
 		httpx.Error(w, http.StatusRequestEntityTooLarge, "File too large for text editing")
 		return
 	}
-	n, err := versions.Archive(r.Context(), h.s3, h.versions, user.ID, sess.Bucket, sess.Key, versions.SourceTextEdit, req.Remark)
+	n, err := versions.Archive(r.Context(), h.client(r), h.versions, user.ID, sess.Bucket, sess.Key, versions.SourceTextEdit, req.Remark)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			httpx.Error(w, http.StatusNotFound, "Object not found")
@@ -237,7 +237,7 @@ func (h *Handler) textPresignSave(w http.ResponseWriter, r *http.Request, user *
 	if req.ContentType != nil {
 		ct = strings.TrimSpace(*req.ContentType)
 	}
-	url, expires, err := h.s3.PresignPut(r.Context(), sess.Bucket, sess.Key, ct)
+	url, expires, err := h.client(r).PresignPut(r.Context(), sess.Bucket, sess.Key, ct)
 	if err != nil {
 		httpx.Error(w, http.StatusBadGateway, "storage error")
 		return
@@ -271,7 +271,7 @@ func (h *Handler) textCompleteSave(w http.ResponseWriter, r *http.Request, user 
 		httpx.Error(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	meta, err := h.s3.HeadObject(r.Context(), sess.Bucket, sess.Key)
+	meta, err := h.client(r).HeadObject(r.Context(), sess.Bucket, sess.Key)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			httpx.Error(w, http.StatusNotFound, "Saved object not found")
