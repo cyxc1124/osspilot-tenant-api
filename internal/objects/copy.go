@@ -239,6 +239,9 @@ func renameDest(key, newName string) (string, error) {
 }
 
 func CopyErr(err error) string {
+	if errors.Is(err, ErrDestExists) {
+		return ErrDestExists.Error()
+	}
 	if errors.Is(err, storage.ErrNotFound) {
 		return "Object not found"
 	}
