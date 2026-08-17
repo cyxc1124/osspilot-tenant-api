@@ -1,0 +1,854 @@
+openapi: 3.1.0
+info:
+  title: OssPilot Tenant API
+  version: 0.1.0
+paths:
+  /healthz:
+    get:
+      summary: Liveness
+      responses:
+        "200":
+          description: ok
+  /api/login:
+    post:
+      summary: Tenant portal login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+                portal: { type: string, enum: [tenant] }
+      responses:
+        "200":
+          description: JWT; includes must_change_password
+        "401":
+          description: bad credentials
+  /api/logout:
+    post:
+      summary: Stateless logout
+      responses:
+        "200":
+          description: client should discard token
+  /api/me:
+    get:
+      summary: Current user
+      responses:
+        "200":
+          description: profile including must_change_password
+  /api/password/change:
+    post:
+      summary: Change password
+      responses:
+        "204":
+          description: changed
+  /api/buckets:
+    get:
+      summary: List buckets
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create bucket metadata
+      responses:
+        "201":
+          description: created
+  /api/buckets/{bucket_name}:
+    get:
+      summary: Get bucket
+      responses:
+        "200":
+          description: detail
+    put:
+      summary: Update bucket metadata
+      responses:
+        "200":
+          description: detail
+    delete:
+      summary: Delete bucket metadata
+      responses:
+        "204":
+          description: deleted
+  /api/buckets/{bucket_name}/policy:
+    get:
+      summary: Get S3 bucket policy
+      responses:
+        "200":
+          description: policy or empty
+    put:
+      summary: Replace S3 bucket policy
+      responses:
+        "200":
+          description: saved
+        "400":
+          description: invalid policy
+    delete:
+      summary: Delete S3 bucket policy
+      responses:
+        "204":
+          description: deleted
+  /api/buckets/{bucket_name}/cors:
+    get:
+      summary: Get bucket CORS rules
+      responses:
+        "200":
+          description: rules
+    put:
+      summary: Replace bucket CORS rules
+      responses:
+        "200":
+          description: saved
+        "400":
+          description: invalid rules
+    delete:
+      summary: Delete bucket CORS
+      responses:
+        "204":
+          description: deleted
+  /api/buckets/{bucket_name}/objects:
+    get:
+      summary: List object metadata
+      responses:
+        "200":
+          description: items and prefixes
+    delete:
+      summary: Soft-delete objects into .trash/, or permanently delete when permanent=true
+      responses:
+        "200":
+          description: deleted and failed keys, or status=queued when ≥2 keys
+        "503":
+          description: storage or Redis is not configured
+  /api/buckets/{bucket_name}/objects/detail:
+    get:
+      summary: Object metadata
+      responses:
+        "200":
+          description: detail
+  /api/buckets/{bucket_name}/objects/directories:
+    post:
+      summary: Create directory placeholder
+      responses:
+        "200":
+          description: created
+  /api/buckets/{bucket_name}/objects/copy:
+    post:
+      summary: Copy objects within or across visible buckets
+      responses:
+        "200":
+          description: copied and failed, or status=queued when ≥2 items
+        "503":
+          description: storage or Redis is not configured
+  /api/buckets/{bucket_name}/objects/move:
+    post:
+      summary: Move objects within a bucket
+      responses:
+        "200":
+          description: moved and failed, or status=queued when ≥2 items
+        "503":
+          description: storage or Redis is not configured
+  /api/buckets/{bucket_name}/objects/rename:
+    post:
+      summary: Rename an object in place
+      responses:
+        "200":
+          description: renamed
+  /api/buckets/{bucket_name}/trash:
+    get:
+      summary: List soft-deleted objects (original keys, without .trash/)
+      responses:
+        "200":
+          description: items
+    delete:
+      summary: Permanently delete objects from the recycle bin
+      responses:
+        "200":
+          description: succeeded and failed keys
+        "503":
+          description: storage is not configured
+  /api/buckets/{bucket_name}/trash/restore:
+    post:
+      summary: Restore objects from .trash/ back to their original keys
+      responses:
+        "200":
+          description: succeeded and failed keys
+        "503":
+          description: storage is not configured
+  /api/uploads/presign:
+    post:
+      summary: Presign PUT upload
+      responses:
+        "200":
+          description: url and headers
+  /api/uploads/complete:
+    post:
+      summary: Finalize simple upload
+      responses:
+        "200":
+          description: object metadata
+  /api/uploads/multipart/init:
+    post:
+      summary: Start multipart upload
+      responses:
+        "200":
+          description: upload_id
+  /api/uploads/multipart/parts:
+    post:
+      summary: Presign multipart parts
+      responses:
+        "200":
+          description: part urls
+  /api/uploads/multipart/complete:
+    post:
+      summary: Complete multipart upload
+      responses:
+        "200":
+          description: object metadata
+  /api/uploads/multipart/abort:
+    post:
+      summary: Abort multipart upload
+      responses:
+        "200":
+          description: aborted
+  /api/downloads/presign:
+    post:
+      summary: Presign GET download
+      responses:
+        "200":
+          description: url
+  /api/downloads/batch:
+    post:
+      summary: Batch presign GET
+      responses:
+        "200":
+          description: items
+  /api/preview/text:
+    get:
+      summary: Fetch small text object for preview
+      responses:
+        "200":
+          description: content and language
+        "413":
+          description: too large
+  /api/preview/image:
+    get:
+      summary: Presign image preview URL
+      responses:
+        "200":
+          description: preview_url
+  /api/preview/video:
+    get:
+      summary: Presign video preview URL
+      responses:
+        "200":
+          description: preview_url
+  /api/preview/audio:
+    get:
+      summary: Presign audio preview URL
+      responses:
+        "200":
+          description: preview_url
+  /api/preview/pdf:
+    get:
+      summary: Presign PDF preview URL
+      responses:
+        "200":
+          description: preview_url
+  /api/login-branding:
+    get:
+      summary: Public tenant login branding
+      responses:
+        "200":
+          description: logo_text, title, subtitle
+  /api/platform-config:
+    get:
+      summary: Effective storage/CDN config
+      responses:
+        "200":
+          description: region, endpoints, trash policy
+        "401":
+          description: missing or invalid token
+  /internal/accounts/{username}:
+    put:
+      summary: Upsert a tenant account projected from ops
+      responses:
+        "204":
+          description: upserted
+        "401":
+          description: bad projection secret
+    delete:
+      summary: Delete a projected tenant account
+      responses:
+        "204":
+          description: deleted
+  /internal/accounts/{username}/buckets:
+    put:
+      summary: Replace ops-sourced bucket grants
+      responses:
+        "204":
+          description: replaced
+        "404":
+          description: account missing
+  /internal/api-access:
+    get:
+      summary: List tenant Open API access requests for ops
+      responses:
+        "200":
+          description: items and total
+        "401":
+          description: bad projection secret
+  /internal/api-access/{username}:
+    get:
+      summary: Get Open API access for a tenant username
+      responses:
+        "200":
+          description: access record
+        "404":
+          description: not found
+  /internal/api-access/{username}/approve:
+    post:
+      summary: Approve a pending Open API access request
+      responses:
+        "200":
+          description: approved
+        "409":
+          description: not pending
+  /internal/api-access/{username}/reject:
+    post:
+      summary: Reject a pending Open API access request
+      responses:
+        "200":
+          description: rejected
+        "409":
+          description: not pending
+  /internal/api-access/{username}/disable:
+    post:
+      summary: Disable approved Open API access
+      responses:
+        "200":
+          description: disabled
+        "409":
+          description: not approved
+  /internal/buckets/{bucket_name}/inventory:
+    post:
+      summary: Enqueue inventory scan for a bucket (ops proxy)
+      responses:
+        "200":
+          description: job_id and message
+        "401":
+          description: bad projection secret
+        "503":
+          description: queue unavailable
+  /internal/settings:
+    put:
+      summary: Upsert projected platform settings from ops
+      responses:
+        "204":
+          description: upserted
+        "401":
+          description: bad projection secret
+        "400":
+          description: unsupported key
+  /internal/stats/usage:
+    get:
+      summary: Aggregate object_records usage for ops stats
+      responses:
+        "200":
+          description: totals and per-bucket usage
+        "401":
+          description: bad projection secret
+  /internal/accounts/{username}/rbac/user-groups:
+    get:
+      summary: List user groups for a projected account (ops proxy)
+      responses:
+        "200":
+          description: items
+        "401":
+          description: bad projection secret
+    post:
+      summary: Create user group for a projected account
+      responses:
+        "201":
+          description: created
+  /internal/accounts/{username}/rbac/permissions:
+    get:
+      summary: List permissions for a projected account (ops proxy)
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create permission for a projected account
+      responses:
+        "201":
+          description: created
+  /internal/accounts/{username}/rbac/permission-templates:
+    get:
+      summary: List permission templates for a projected account
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create permission template for a projected account
+      responses:
+        "201":
+          description: created
+  /api/versions:
+    get:
+      summary: List archived versions of an object
+      responses:
+        "200":
+          description: items and total
+  /api/versions/{version_id}:
+    get:
+      summary: Version metadata
+      responses:
+        "200":
+          description: summary
+        "404":
+          description: not found
+    delete:
+      summary: Delete an archived version
+      responses:
+        "200":
+          description: deleted
+  /api/versions/{version_id}/download:
+    post:
+      summary: Presign GET for an archived version
+      responses:
+        "200":
+          description: url
+  /api/versions/{version_id}/restore:
+    post:
+      summary: Restore an archived version onto the live key
+      responses:
+        "200":
+          description: restored
+  /api/share-links:
+    get:
+      summary: List active share links
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create a temporary share link
+      responses:
+        "200":
+          description: item
+        "503":
+          description: storage is not configured
+  /api/share-links/{link_id}:
+    delete:
+      summary: Revoke a share link
+      responses:
+        "204":
+          description: revoked
+        "404":
+          description: not found
+  /s/{token}:
+    get:
+      summary: Public share access (presigned URLs, no JWT)
+      responses:
+        "200":
+          description: download and preview urls
+        "401":
+          description: invalid or missing password
+        "403":
+          description: access limit reached
+        "404":
+          description: not found
+        "410":
+          description: expired
+  /api/file-locks/status:
+    get:
+      summary: Current edit lock for an object
+      responses:
+        "200":
+          description: lock state
+  /api/file-locks/lock:
+    post:
+      summary: Acquire or refresh an exclusive edit lock
+      responses:
+        "200":
+          description: acquired or readonly
+  /api/file-locks/refresh:
+    post:
+      summary: Extend lock TTL
+      responses:
+        "200":
+          description: refreshed
+  /api/file-locks/unlock:
+    post:
+      summary: Release an edit lock
+      responses:
+        "200":
+          description: unlocked
+  /api/text-edit/open:
+    post:
+      summary: Open a Monaco text editing session
+      responses:
+        "200":
+          description: content and lock
+  /api/text-edit/{session_id}/save:
+    post:
+      summary: Archive current version then put edited text
+      responses:
+        "200":
+          description: saved
+  /api/text-edit/{session_id}/presign-save:
+    post:
+      summary: Archive current version and return a presigned PUT for direct save
+      responses:
+        "200":
+          description: upload_url
+  /api/text-edit/{session_id}/complete-save:
+    post:
+      summary: Confirm a presigned text save
+      responses:
+        "200":
+          description: saved
+  /api/text-edit/unlock:
+    post:
+      summary: Release the text-edit lock
+      responses:
+        "200":
+          description: unlocked
+  /api/text-edit/close:
+    post:
+      summary: Close a text session and release its lock
+      responses:
+        "200":
+          description: closed
+  /api/editor/open:
+    post:
+      summary: Open an ONLYOFFICE session for docx/xlsx/pptx
+      responses:
+        "200":
+          description: office_url and config
+        "503":
+          description: OFFICE_URL unset
+  /api/editor/files/{session_id}/download:
+    get:
+      summary: Serve the document to ONLYOFFICE Document Server
+      responses:
+        "200":
+          description: file bytes
+  /api/editor/callback/{session_id}:
+    post:
+      summary: ONLYOFFICE save/status callback
+      responses:
+        "200":
+          description: error code 0 or 1
+  /api/editor/save:
+    post:
+      summary: Latest saved metadata for an office session
+      responses:
+        "200":
+          description: saved
+        "409":
+          description: callback has not saved yet
+  /api/editor/unlock:
+    post:
+      summary: Release an office edit lock
+      responses:
+        "200":
+          description: unlocked
+  /api/roles:
+    get:
+      summary: List tenant role catalog
+      responses:
+        "200":
+          description: items
+  /api/users:
+    get:
+      summary: List users in the current account
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create a member user
+      responses:
+        "201":
+          description: created
+  /api/users/{user_id}:
+    get:
+      summary: Get a member user
+      responses:
+        "200":
+          description: summary
+    put:
+      summary: Update a member user
+      responses:
+        "200":
+          description: summary
+    delete:
+      summary: Delete a member user
+      responses:
+        "200":
+          description: deleted summary
+  /api/user-groups:
+    get:
+      summary: List user groups
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create a user group
+      responses:
+        "201":
+          description: created
+  /api/user-groups/{group_id}:
+    get:
+      summary: Get a user group
+      responses:
+        "200":
+          description: group
+    put:
+      summary: Update a user group
+      responses:
+        "200":
+          description: group
+    delete:
+      summary: Delete a user group
+      responses:
+        "200":
+          description: deleted group
+  /api/user-groups/{group_id}/members:
+    post:
+      summary: Add group members
+      responses:
+        "200":
+          description: group
+  /api/user-groups/{group_id}/members/{user_id}:
+    delete:
+      summary: Remove a group member
+      responses:
+        "200":
+          description: group
+  /api/permissions:
+    get:
+      summary: List permission rules
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create a permission rule
+      responses:
+        "201":
+          description: created
+  /api/permissions/{permission_id}:
+    put:
+      summary: Update a permission rule
+      responses:
+        "200":
+          description: rule
+    delete:
+      summary: Delete a permission rule
+      responses:
+        "200":
+          description: deleted rule
+  /api/permission-templates:
+    get:
+      summary: List permission templates
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create a permission template
+      responses:
+        "201":
+          description: created
+  /api/permission-templates/{template_id}:
+    get:
+      summary: Get a permission template
+      responses:
+        "200":
+          description: template
+    put:
+      summary: Update a permission template
+      responses:
+        "200":
+          description: template
+    delete:
+      summary: Delete a permission template
+      responses:
+        "200":
+          description: deleted template
+  /api/permission-templates/{template_id}/rules:
+    post:
+      summary: Add a template rule
+      responses:
+        "201":
+          description: created
+  /api/permission-templates/{template_id}/rules/{rule_id}:
+    put:
+      summary: Update a template rule
+      responses:
+        "200":
+          description: rule
+    delete:
+      summary: Delete a template rule
+      responses:
+        "200":
+          description: deleted rule
+  /api/permission-templates/{template_id}/assignments:
+    post:
+      summary: Assign a template to a user or group
+      responses:
+        "201":
+          description: created
+  /api/permission-templates/{template_id}/assignments/{assignment_id}:
+    delete:
+      summary: Remove a template assignment
+      responses:
+        "200":
+          description: deleted assignment
+  /api/api-access:
+    get:
+      summary: Tenant Open API access status
+      responses:
+        "200":
+          description: status
+  /api/api-access/request:
+    post:
+      summary: Request Open API access (pending until ops approval)
+      responses:
+        "200":
+          description: status
+  /api/applications:
+    get:
+      summary: List tenant applications
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create a tenant application
+      responses:
+        "201":
+          description: created
+  /api/applications/{application_id}:
+    put:
+      summary: Update a tenant application
+      responses:
+        "200":
+          description: item
+    delete:
+      summary: Delete a tenant application
+      responses:
+        "204":
+          description: deleted
+  /api/applications/{application_id}/access-keys:
+    get:
+      summary: List application access keys
+      responses:
+        "200":
+          description: items
+    post:
+      summary: Create an access key; secret returned only once
+      responses:
+        "201":
+          description: created with secret_access_key
+  /api/applications/{application_id}/access-keys/{key_id}:
+    delete:
+      summary: Disable an access key
+      responses:
+        "200":
+          description: disabled item
+  /api/sts/credentials:
+    post:
+      summary: Issue local STS session token for an access key
+      responses:
+        "200":
+          description: temporary credentials
+  /api/v1/buckets:
+    get:
+      summary: Open API list buckets (OSSAccessKey / OSSSession)
+      responses:
+        "200":
+          description: items
+  /api/v1/buckets/{bucket_name}:
+    get:
+      summary: Open API get bucket
+      responses:
+        "200":
+          description: detail
+  /api/v1/buckets/{bucket_name}/objects:
+    get:
+      summary: Open API list objects
+      responses:
+        "200":
+          description: items
+  /api/v1/uploads/presign:
+    post:
+      summary: Open API presign upload
+      responses:
+        "200":
+          description: url
+  /api/v1/downloads/presign:
+    post:
+      summary: Open API presign download
+      responses:
+        "200":
+          description: url
+  /api/v1/sts/credentials:
+    post:
+      summary: Open API issue STS (requires OSSAccessKey)
+      responses:
+        "200":
+          description: temporary credentials
+  /api/stats:
+    get:
+      summary: Account capacity stats from object_records
+      responses:
+        "200":
+          description: usage
+  /api/stats/buckets:
+    get:
+      summary: Per-bucket capacity stats
+      responses:
+        "200":
+          description: items
+  /api/stats/traffic:
+    get:
+      summary: Account traffic stats (zeros until access logs)
+      responses:
+        "200":
+          description: zeros
+  /api/stats/buckets/requests:
+    get:
+      summary: Per-bucket request stats (zeros until access logs)
+      responses:
+        "200":
+          description: items
+  /api/stats/prefixes:
+    get:
+      summary: First-level prefix capacity within a bucket
+      parameters:
+        - in: query
+          name: bucket_name
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: items
+  /api/audit-logs:
+    get:
+      summary: List tenant audit logs
+      responses:
+        "200":
+          description: page
+  /api/audit-logs/export:
+    get:
+      summary: Export audit logs as CSV
+      responses:
+        "200":
+          description: csv
+  /api/alerts/notifications:
+    get:
+      summary: Open tenant alert notifications
+      responses:
+        "200":
+          description: items
