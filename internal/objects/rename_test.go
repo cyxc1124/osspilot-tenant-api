@@ -15,3 +15,9 @@ func TestRenameDest(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestCopyErrDestExists(t *testing.T) {
+	if CopyErr(ErrDestExists) != "Destination already exists" {
+		t.Fatal(CopyErr(ErrDestExists))
+	}
+}

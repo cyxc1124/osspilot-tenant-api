@@ -34,12 +34,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/alerts/notifications", h.protect(h.alerts))
 }
 
-func (h *Handler) gate(w http.ResponseWriter, r *http.Request, user *auth.User) (int64, bool) {
+func (h *Handler) accountID(w http.ResponseWriter, r *http.Request, user *auth.User) (int64, bool) {
 	if h.buckets == nil {
 		httpx.Error(w, http.StatusServiceUnavailable, "database is not configured")
-		return 0, false
-	}
-	if h.ac.Forbidden(w, r, user, "", "", rbac.ActionRead) {
 		return 0, false
 	}
 	id := auth.AccountID(user)
@@ -53,6 +50,17 @@ func (h *Handler) gate(w http.ResponseWriter, r *http.Request, user *auth.User) 
 	return id, true
 }
 
+func (h *Handler) gate(w http.ResponseWriter, r *http.Request, user *auth.User) (int64, bool) {
+	id, ok := h.accountID(w, r, user)
+	if !ok {
+		return 0, false
+	}
+	if h.ac.Forbidden(w, r, user, "", "", rbac.ActionRead) {
+		return 0, false
+	}
+	return id, true
+}
+
 func (h *Handler) visible(w http.ResponseWriter, r *http.Request, user *auth.User, accountID int64) ([]bucket.Bucket, bool) {
 	items, err := h.buckets.List(r.Context(), accountID)
 	if err != nil {
@@ -62,8 +70,19 @@ func (h *Handler) visible(w http.ResponseWriter, r *http.Request, user *auth.Use
 	if auth.IsAdmin(user) || h.ac == nil {
 		return items, true
 	}
+	ownOnly, err := h.ac.ScopeOwnBuckets(r.Context(), user)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return nil, false
+	}
 	out := make([]bucket.Bucket, 0, len(items))
 	for _, b := range items {
+		if ownOnly {
+			if b.CreatedBy != nil && *b.CreatedBy == user.ID {
+				out = append(out, b)
+			}
+			continue
+		}
 		ok, err := h.ac.Allow(r.Context(), user, b.BucketName, "", rbac.ActionRead)
 		if err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "database error")
@@ -100,9 +119,10 @@ func (h *Handler) account(w http.ResponseWriter, r *http.Request, user *auth.Use
 		verB += u.VersionBytes
 		verN += u.VersionCount
 	}
-	var collected any
-	if len(items) > 0 {
-		collected = time.Now().UTC().Format(time.RFC3339)
+	collectedAt, err := h.buckets.LatestInventoriedAt(r.Context(), ids)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
 	}
 	var quota *int64
 	if h.users != nil {
@@ -120,7 +140,7 @@ func (h *Handler) account(w http.ResponseWriter, r *http.Request, user *auth.Use
 		"remaining_bytes": remainingBytes(quota, used), "object_count": count,
 		"trash_bytes": trashB, "trash_object_count": trashN,
 		"version_bytes": verB, "version_object_count": verN,
-		"usage_percent": usagePercent(used, quota), "collected_at": collected,
+		"usage_percent": usagePercent(used, quota), "collected_at": rfc3339(collectedAt),
 	})
 }
 
@@ -139,9 +159,10 @@ func (h *Handler) bucketStats(w http.ResponseWriter, r *http.Request, user *auth
 		return
 	}
 	out := make([]map[string]any, 0, len(items))
-	var collected any
-	if len(items) > 0 {
-		collected = time.Now().UTC().Format(time.RFC3339)
+	collectedAt, err := h.buckets.LatestInventoriedAt(r.Context(), idsOf(items))
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "database error")
+		return
 	}
 	for _, b := range items {
 		u := usage[b.ID]
@@ -153,7 +174,7 @@ func (h *Handler) bucketStats(w http.ResponseWriter, r *http.Request, user *auth
 			"usage_percent": usagePercent(u.UsedBytes, b.QuotaBytes),
 		})
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": out, "collected_at": collected})
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": out, "collected_at": rfc3339(collectedAt)})
 }
 
 func (h *Handler) traffic(w http.ResponseWriter, r *http.Request, user *auth.User) {
@@ -262,7 +283,7 @@ func (h *Handler) prefixes(w http.ResponseWriter, r *http.Request, user *auth.Us
 }
 
 func (h *Handler) alerts(w http.ResponseWriter, r *http.Request, user *auth.User) {
-	accountID, ok := h.gate(w, r, user)
+	accountID, ok := h.accountID(w, r, user)
 	if !ok {
 		return
 	}

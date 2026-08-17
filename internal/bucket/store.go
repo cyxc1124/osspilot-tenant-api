@@ -87,6 +87,14 @@ func (s *Store) VisibleID(ctx context.Context, accountID int64, name string) (*i
 	return &b.ID, nil
 }
 
+func (s *Store) Owner(ctx context.Context, accountID int64, name string) (*int64, error) {
+	b, err := s.GetVisible(ctx, accountID, name)
+	if err != nil || b == nil {
+		return nil, err
+	}
+	return b.CreatedBy, nil
+}
+
 func (s *Store) GrantLocal(ctx context.Context, userID, bucketID int64) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO account_bucket_grants (user_id, bucket_id, local) VALUES ($1,$2,true)
@@ -307,6 +315,17 @@ func (s *Store) ListActive(ctx context.Context) ([]Bucket, error) {
 		out = append(out, b)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) LatestInventoriedAt(ctx context.Context, ids []int64) (*time.Time, error) {
+	if s == nil || s.pool == nil || len(ids) == 0 {
+		return nil, nil
+	}
+	var at *time.Time
+	if err := s.pool.QueryRow(ctx, `SELECT MAX(inventoried_at) FROM buckets WHERE id = ANY($1)`, ids).Scan(&at); err != nil {
+		return nil, fmt.Errorf("latest inventoried: %w", err)
+	}
+	return at, nil
 }
 
 func (s *Store) MarkInventoried(ctx context.Context, id int64, at time.Time) error {

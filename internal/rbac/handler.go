@@ -13,6 +13,7 @@ import (
 
 type bucketIDs interface {
 	VisibleID(ctx context.Context, accountID int64, name string) (*int64, error)
+	Owner(ctx context.Context, accountID int64, name string) (*int64, error)
 }
 
 type auditor interface {
@@ -30,7 +31,7 @@ type Handler struct {
 }
 
 func NewHandler(users *auth.Store, store *Store, buckets bucketIDs, protect func(auth.UserHandler) http.HandlerFunc, log auditor, projectionSecret string) *Handler {
-	return &Handler{users: users, store: store, buckets: buckets, protect: protect, ac: NewChecker(store), log: log, secret: projectionSecret}
+	return &Handler{users: users, store: store, buckets: buckets, protect: protect, ac: NewChecker(store, buckets), log: log, secret: projectionSecret}
 }
 
 func (h *Handler) Checker() *Checker { return h.ac }

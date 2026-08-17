@@ -106,8 +106,19 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request, user *auth.User) 
 		return
 	}
 	if !auth.IsAdmin(user) && h.ac != nil {
+		ownOnly, err := h.ac.ScopeOwnBuckets(r.Context(), user)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "database error")
+			return
+		}
 		filtered := make([]Bucket, 0, len(items))
 		for _, b := range items {
+			if ownOnly {
+				if b.CreatedBy != nil && *b.CreatedBy == user.ID {
+					filtered = append(filtered, b)
+				}
+				continue
+			}
 			ok, err := h.ac.Allow(r.Context(), user, b.BucketName, "", rbac.ActionRead)
 			if err != nil {
 				httpx.Error(w, http.StatusInternalServerError, "database error")

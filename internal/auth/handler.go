@@ -6,16 +6,28 @@ import (
 	"time"
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
+
+type auditor interface {
+	Record(r *http.Request, user *User, bucket, key, action, status, errMsg string)
+}
 
 type Handler struct {
 	store  *Store
 	secret string
 	ttl    time.Duration
+	log    auditor
 }
 
-func NewHandler(store *Store, secret string, ttl time.Duration) *Handler {
-	return &Handler{store: store, secret: secret, ttl: ttl}
+func NewHandler(store *Store, secret string, ttl time.Duration, log auditor) *Handler {
+	return &Handler{store: store, secret: secret, ttl: ttl, log: log}
+}
+
+func (h *Handler) audit(r *http.Request, user *User, action, status, errMsg string) {
+	if h.log != nil {
+		h.log.Record(r, user, "", "", action, status, errMsg)
+	}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
@@ -78,6 +90,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if user == nil || !CheckPassword(req.Password, user.PasswordHash) {
+		h.audit(r, user, "login_failed", "failure", "Invalid username or password")
 		httpx.Error(w, http.StatusUnauthorized, "Invalid username or password")
 		return
 	}
@@ -140,18 +153,22 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request, user *U
 		return
 	}
 	if !CheckPassword(req.OldPassword, user.PasswordHash) {
-		httpx.Error(w, http.StatusUnauthorized, "Invalid username or password")
+		h.audit(r, user, "password_change", "failure", "Current password is incorrect")
+		httpx.Error(w, http.StatusBadRequest, "Current password is incorrect")
 		return
 	}
 	hash, err := HashPassword(req.NewPassword)
 	if err != nil {
+		h.audit(r, user, "password_change", "failure", "hash error")
 		httpx.Error(w, http.StatusInternalServerError, "hash error")
 		return
 	}
 	if err := h.store.UpdatePassword(r.Context(), user.ID, hash, time.Now()); err != nil {
+		h.audit(r, user, "password_change", "failure", "database error")
 		httpx.Error(w, http.StatusInternalServerError, "database error")
 		return
 	}
+	h.audit(r, user, "password_change", "success", "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -186,6 +203,7 @@ func (h *Handler) RequireUser(next UserHandler) http.HandlerFunc {
 			httpx.Error(w, http.StatusForbidden, "password change required")
 			return
 		}
+		r = r.WithContext(storage.WithAccountS3(r.Context(), user.S3Endpoint, user.S3RegionName))
 		next(w, r, user)
 	}
 }

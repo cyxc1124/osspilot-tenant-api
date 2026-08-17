@@ -2,11 +2,15 @@ package auth
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/cyxc1124/osspilot-tenant-api/internal/storage"
 )
 
 type User struct {
@@ -23,6 +27,11 @@ type User struct {
 	QuotaBytes         *int64
 	ObjectLimit        *int64
 	DailyUploadBytes   *int64
+	StorageRegionID    *int64
+	StorageRegionCode  string
+	StorageRegionName  string
+	S3Endpoint         string
+	S3RegionName       string
 	CreatedAt          time.Time
 	LastLoginAt        *time.Time
 }
@@ -35,15 +44,29 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
-const userCols = `id, username, password_hash, display_name, email, phone, status, role, must_change_password,
-	COALESCE(account_id, id), quota_bytes, object_limit, daily_upload_bytes, created_at, last_login_at`
+const userCols = `u.id, u.username, u.password_hash, u.display_name, u.email, u.phone, u.status, u.role, u.must_change_password,
+	COALESCE(u.account_id, u.id), u.quota_bytes, u.object_limit, u.daily_upload_bytes, u.created_at, u.last_login_at,
+	acct.storage_region_id, acct.storage_region_code, acct.storage_region_name, acct.s3_endpoint, acct.s3_region_name`
+
+const userFrom = `tenant_users u LEFT JOIN tenant_users acct ON acct.id = COALESCE(u.account_id, u.id)`
 
 func (s *Store) GetByUsername(ctx context.Context, username string) (*User, error) {
-	return s.scanUser(ctx, `SELECT `+userCols+` FROM tenant_users WHERE username = $1`, username)
+	return s.scanUser(ctx, `SELECT `+userCols+` FROM `+userFrom+` WHERE u.username = $1`, username)
 }
 
 func (s *Store) GetByID(ctx context.Context, id int64) (*User, error) {
-	return s.scanUser(ctx, `SELECT `+userCols+` FROM tenant_users WHERE id = $1`, id)
+	return s.scanUser(ctx, `SELECT `+userCols+` FROM `+userFrom+` WHERE u.id = $1`, id)
+}
+
+func (s *Store) BindS3(r *http.Request, accountID int64) *http.Request {
+	if s == nil || r == nil || accountID < 1 {
+		return r
+	}
+	u, err := s.GetByID(r.Context(), accountID)
+	if err != nil || u == nil {
+		return r
+	}
+	return r.WithContext(storage.WithAccountS3(r.Context(), u.S3Endpoint, u.S3RegionName))
 }
 
 func (s *Store) TouchLogin(ctx context.Context, id int64, at time.Time) error {
@@ -61,8 +84,10 @@ func (s *Store) Upsert(ctx context.Context, u Upsert) (int64, error) {
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO tenant_users (
 			username, password_hash, display_name, email, phone, status, role, must_change_password,
-			quota_bytes, object_limit, daily_upload_bytes, created_at, updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,'tenant_admin',COALESCE($7,true),$8,$9,$10,now(),now())
+			quota_bytes, object_limit, daily_upload_bytes,
+			storage_region_id, storage_region_code, storage_region_name, s3_endpoint, s3_region_name,
+			created_at, updated_at
+		) VALUES ($1,$2,$3,$4,$5,$6,'tenant_admin',COALESCE($7,true),$8,$9,$10,$11,$12,$13,$14,$15,now(),now())
 		ON CONFLICT (username) DO UPDATE SET
 			password_hash = CASE WHEN EXCLUDED.password_hash <> '' THEN EXCLUDED.password_hash ELSE tenant_users.password_hash END,
 			display_name = EXCLUDED.display_name,
@@ -74,9 +99,15 @@ func (s *Store) Upsert(ctx context.Context, u Upsert) (int64, error) {
 			quota_bytes = EXCLUDED.quota_bytes,
 			object_limit = EXCLUDED.object_limit,
 			daily_upload_bytes = EXCLUDED.daily_upload_bytes,
+			storage_region_id = EXCLUDED.storage_region_id,
+			storage_region_code = EXCLUDED.storage_region_code,
+			storage_region_name = EXCLUDED.storage_region_name,
+			s3_endpoint = EXCLUDED.s3_endpoint,
+			s3_region_name = EXCLUDED.s3_region_name,
 			updated_at = now()
 		RETURNING id`, u.Username, u.PasswordHash, u.DisplayName, u.Email, u.Phone, u.Status, u.MustChangePassword,
-		u.QuotaBytes, u.ObjectLimit, u.DailyUploadBytes).Scan(&id)
+		u.QuotaBytes, u.ObjectLimit, u.DailyUploadBytes,
+		u.StorageRegionID, u.StorageRegionCode, u.StorageRegionName, u.S3Endpoint, u.S3RegionName).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("upsert user: %w", err)
 	}
@@ -105,14 +136,19 @@ type Upsert struct {
 	QuotaBytes         *int64
 	ObjectLimit        *int64
 	DailyUploadBytes   *int64
+	StorageRegionID    *int64
+	StorageRegionCode  *string
+	StorageRegionName  *string
+	S3Endpoint         *string
+	S3RegionName       *string
 }
 
 func (s *Store) ListByAccount(ctx context.Context, accountID int64) ([]User, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT `+userCols+`
-		FROM tenant_users
-		WHERE id = $1 OR COALESCE(account_id, id) = $1
-		ORDER BY username`, accountID)
+		FROM `+userFrom+`
+		WHERE u.id = $1 OR COALESCE(u.account_id, u.id) = $1
+		ORDER BY u.username`, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -131,8 +167,8 @@ func (s *Store) ListByAccount(ctx context.Context, accountID int64) ([]User, err
 func (s *Store) GetInAccount(ctx context.Context, accountID, userID int64) (*User, error) {
 	return s.scanUser(ctx, `
 		SELECT `+userCols+`
-		FROM tenant_users
-		WHERE id = $2 AND (id = $1 OR COALESCE(account_id, id) = $1)`, accountID, userID)
+		FROM `+userFrom+`
+		WHERE u.id = $2 AND (u.id = $1 OR COALESCE(u.account_id, u.id) = $1)`, accountID, userID)
 }
 
 func (s *Store) InsertMember(ctx context.Context, accountID int64, username, hash string, display, email, phone *string, role string) (*User, error) {
@@ -186,9 +222,18 @@ type userRow interface {
 
 func scanUserRow(row userRow) (User, error) {
 	var u User
+	var code, name, endpoint, region sql.NullString
 	err := row.Scan(
 		&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &u.Email, &u.Phone, &u.Status, &u.Role, &u.MustChangePassword,
 		&u.AccountID, &u.QuotaBytes, &u.ObjectLimit, &u.DailyUploadBytes, &u.CreatedAt, &u.LastLoginAt,
+		&u.StorageRegionID, &code, &name, &endpoint, &region,
 	)
-	return u, err
+	if err != nil {
+		return u, err
+	}
+	u.StorageRegionCode = code.String
+	u.StorageRegionName = name.String
+	u.S3Endpoint = endpoint.String
+	u.S3RegionName = region.String
+	return u, nil
 }

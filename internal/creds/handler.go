@@ -20,6 +20,7 @@ import (
 
 type Handler struct {
 	store    *Store
+	users    *auth.Store
 	protect  func(auth.UserHandler) http.HandlerFunc
 	ac       *rbac.Checker
 	s3End    string
@@ -35,8 +36,8 @@ type Handler struct {
 	quota    *quota.Checker
 }
 
-func NewHandler(store *Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, s3Endpoint, s3Region, jwtSecret string, buckets *bucket.Store, objectStore *objects.Store, uploadStore *uploads.Store, s3 *storage.Client, log *audit.Logger, q *quota.Checker, settings *platform.Store, s3fb storage.Config) *Handler {
-	return &Handler{store: store, protect: protect, ac: ac, s3End: s3Endpoint, s3Reg: s3Region, secret: jwtSecret, buckets: buckets, objects: objectStore, uploads: uploadStore, s3: s3, s3fb: s3fb, settings: settings, log: log, quota: q}
+func NewHandler(store *Store, users *auth.Store, protect func(auth.UserHandler) http.HandlerFunc, ac *rbac.Checker, s3Endpoint, s3Region, jwtSecret string, buckets *bucket.Store, objectStore *objects.Store, uploadStore *uploads.Store, s3 *storage.Client, log *audit.Logger, q *quota.Checker, settings *platform.Store, s3fb storage.Config) *Handler {
+	return &Handler{store: store, users: users, protect: protect, ac: ac, s3End: s3Endpoint, s3Reg: s3Region, secret: jwtSecret, buckets: buckets, objects: objectStore, uploads: uploadStore, s3: s3, s3fb: s3fb, settings: settings, log: log, quota: q}
 }
 
 func (h *Handler) client(r *http.Request) *storage.Client {

@@ -44,6 +44,39 @@ func ValidateActions(actions []string) string {
 	return ""
 }
 
+func accountLevel(userID int64, role string, groupIDs []int64, action string, rules []Rule) bool {
+	return Allowed(userID, role, groupIDs, "", "", action, rules)
+}
+
+// CreatorAllows: 有账号级 bucket_create 的人对自建桶全权。
+func CreatorAllows(userID int64, role string, groupIDs []int64, createdBy *int64, rules []Rule) bool {
+	if createdBy == nil || *createdBy != userID {
+		return false
+	}
+	return accountLevel(userID, role, groupIDs, ActionBucketCreate, rules)
+}
+
+// CreatorScopedList: read+bucket_create 的人列表只看自己建的桶。
+func CreatorScopedList(userID int64, role string, groupIDs []int64, rules []Rule) bool {
+	if accountLevel(userID, role, groupIDs, ActionAdmin, rules) {
+		return false
+	}
+	if accountLevel(userID, role, groupIDs, ActionRead, rules) && !accountLevel(userID, role, groupIDs, ActionBucketCreate, rules) {
+		return false
+	}
+	return accountLevel(userID, role, groupIDs, ActionBucketCreate, rules)
+}
+
+func bucketOnlyRules(rules []Rule, bucket string) []Rule {
+	out := make([]Rule, 0, len(rules))
+	for _, r := range rules {
+		if r.BucketName != nil && *r.BucketName == bucket {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 func Allowed(userID int64, role string, groupIDs []int64, bucket, prefix, action string, rules []Rule) bool {
 	groups := map[int64]struct{}{}
 	for _, id := range groupIDs {

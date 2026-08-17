@@ -6,7 +6,9 @@ import (
 )
 
 type ErrorBody struct {
-	Detail string `json:"detail"`
+	Detail    string `json:"detail"`
+	Locale    string `json:"locale"`
+	ErrorCode string `json:"error_code,omitempty"`
 }
 
 func JSON(w http.ResponseWriter, status int, v any) {
@@ -16,7 +18,9 @@ func JSON(w http.ResponseWriter, status int, v any) {
 }
 
 func Error(w http.ResponseWriter, status int, detail string) {
-	JSON(w, status, ErrorBody{Detail: detail})
+	locale := localeOf(w)
+	msg, code := Localize(detail, locale)
+	JSON(w, status, ErrorBody{Detail: msg, Locale: locale, ErrorCode: code})
 }
 
 func DecodeJSON(r *http.Request, v any) error {
@@ -28,6 +32,7 @@ func DecodeJSON(r *http.Request, v any) error {
 
 func CORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w = locWriter{ResponseWriter: w, locale: ResolveLocale(r)}
 		origin := r.Header.Get("Origin")
 		if origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)

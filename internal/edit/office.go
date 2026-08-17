@@ -152,6 +152,7 @@ func (h *Handler) officeDownload(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusForbidden, "Invalid download token")
 		return
 	}
+	r = h.users.BindS3(r, sess.UserID)
 	kind, ok := officeExts[fileExt(sess.Key)]
 	if !ok {
 		httpx.Error(w, http.StatusBadRequest, "Unsupported file type")
@@ -191,6 +192,7 @@ func (h *Handler) officeCallback(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusForbidden, "Invalid callback token")
 		return
 	}
+	r = h.users.BindS3(r, sess.UserID)
 	var body map[string]any
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(&body); err != nil && !errors.Is(err, io.EOF) {

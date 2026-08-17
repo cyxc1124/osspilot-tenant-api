@@ -58,6 +58,7 @@ func (o *openAPI) auth(next openHandler) http.HandlerFunc {
 			httpx.Error(w, se.status, se.msg)
 			return
 		}
+		r = o.h.users.BindS3(r, p.AccountID)
 		next(w, r, p)
 	}
 }
