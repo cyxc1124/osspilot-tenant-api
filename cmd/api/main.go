@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/cyxc1124/osspilot-tenant-api"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/audit"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/auth"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/bucket"
@@ -53,6 +54,7 @@ type apiHandlers struct {
 func newMux(h apiHandlers) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
+	openapidoc.Register(mux)
 	if h.auth != nil {
 		h.auth.Register(mux)
 	}
