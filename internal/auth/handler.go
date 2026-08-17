@@ -140,7 +140,7 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request, user *U
 		return
 	}
 	if !CheckPassword(req.OldPassword, user.PasswordHash) {
-		httpx.Error(w, http.StatusUnauthorized, "Invalid username or password")
+		httpx.Error(w, http.StatusBadRequest, "Current password is incorrect")
 		return
 	}
 	hash, err := HashPassword(req.NewPassword)
