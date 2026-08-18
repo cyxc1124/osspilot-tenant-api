@@ -13,6 +13,8 @@ go test ./...
 go run ./cmd/api
 ```
 
+日志走 stdout（`log/slog`）。`LOG_LEVEL=debug|info|warn|error`（默认 info），`LOG_FORMAT=text|json`（默认 text）。请求打一条 `http`（`/healthz` 只在 debug）。
+
 后台 worker 在独立仓 [osspilot-tenant-worker](https://github.com/cyxc1124/osspilot-tenant-worker)。本仓只入队，不跑 migrate 以外的后台进程。未设 `REDIS_URL` 时批量接口返回 503。API 不依赖 Redis 才能启动。
 
 - `GET /healthz`

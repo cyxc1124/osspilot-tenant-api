@@ -11,10 +11,12 @@ import (
 	"github.com/pressly/goose/v3"
 
 	"github.com/cyxc1124/osspilot-tenant-api/internal/config"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/logx"
 	"github.com/cyxc1124/osspilot-tenant-api/migrations"
 )
 
 func main() {
+	logx.Setup("osspilot-tenant-api")
 	cfg := config.Load()
 	if cfg.DatabaseURL == "" {
 		slog.Error("DATABASE_URL is required")
