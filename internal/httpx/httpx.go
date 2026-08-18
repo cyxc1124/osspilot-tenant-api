@@ -2,7 +2,9 @@ package httpx
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
+	"time"
 )
 
 type ErrorBody struct {
@@ -47,3 +49,34 @@ func CORS(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+func AccessLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sw := &statusWriter{ResponseWriter: w, code: http.StatusOK}
+		start := time.Now()
+		next.ServeHTTP(sw, r)
+		args := []any{"method", r.Method, "path", r.URL.Path, "status", sw.code, "ms", time.Since(start).Milliseconds()}
+		switch {
+		case r.URL.Path == "/healthz":
+			slog.Debug("http", args...)
+		case sw.code >= 500:
+			slog.Error("http", args...)
+		case sw.code >= 400:
+			slog.Warn("http", args...)
+		default:
+			slog.Info("http", args...)
+		}
+	})
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	code int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.code = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }

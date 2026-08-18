@@ -18,6 +18,7 @@ import (
 	"github.com/cyxc1124/osspilot-tenant-api/internal/downloads"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/edit"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/httpx"
+	"github.com/cyxc1124/osspilot-tenant-api/internal/logx"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/objects"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/platform"
 	"github.com/cyxc1124/osspilot-tenant-api/internal/preview"
@@ -103,7 +104,7 @@ func newMux(h apiHandlers) http.Handler {
 	if h.usage != nil {
 		h.usage.Register(mux)
 	}
-	return httpx.CORS(mux)
+	return httpx.AccessLog(httpx.CORS(mux))
 }
 
 func healthz(w http.ResponseWriter, _ *http.Request) {
@@ -112,6 +113,7 @@ func healthz(w http.ResponseWriter, _ *http.Request) {
 }
 
 func main() {
+	logx.Setup("osspilot-tenant-api")
 	cfg := config.Load()
 	if cfg.DefaultJWTUsed {
 		slog.Warn("JWT_SECRET unset; using development default")
