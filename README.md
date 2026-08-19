@@ -54,7 +54,7 @@ go run ./cmd/api
 
 租户不内置账号。运营投影写入的账号角色为 `tenant_admin`，`account_id` 等于自身 id。控制台可在账号下建子用户 / 组 / 权限规则 / 模板；`tenant_admin` 仍可做现有全部操作，其他角色按最长前缀规则鉴权（`admin` 覆盖其余动作），看不见的桶仍 404。租户控制台自建的桶会记成本地授权，运营改授权时不会清掉。对象版本是覆盖前复制到 `.versions/` 的归档（文本编辑保存时会先归档；恢复当前对象时也会先归档）。删除对象默认复制到 `.trash/{原 key}` 并改写 `object_records`（不是单独的回收站表）；回收站列表剥掉 `.trash/` 前缀。大批量删除/复制/移动在 `REDIS_URL` 可用时入队 asynq（阈值 2，与对照仓 `BATCH_ASYNC_MIN_KEYS` 一致；单目录展开后仍 ≥2 也入队）。清单扫描与回收站/版本/分片清理由 [osspilot-tenant-worker](https://github.com/cyxc1124/osspilot-tenant-worker) 消费。分享链接存在 `share_links`；缺省 7 天过期，访问时签发短时预签名 GET（上限与下载预签名相同）。预签名 GET 在配置了 download/preview CDN 时改写主机。在线编辑用 `file_locks`（TTL 2h）和 `edit_sessions`（TTL 8h）；别人占用时以只读打开。ONLYOFFICE 需要 `OFFICE_URL`（也可写在 `platform_settings.office_url`），以及 Document Server 能访问到的 `TENANT_API_PUBLIC_URL`。用户带 `must_change_password=true` 时，除改密、`/api/me`、登出外一律 403。新密码至少 8 位且不能与旧密码相同。应用密钥用 bcrypt 存 hash；STS 签发本仓 JWT（时长默认 3600 秒，最短 900，最长 12 小时），等 O11 再接真 RGW STS。对象删、上传完成、分享、用户管理、凭证会写 `audit_logs`。桶 `used_bytes` / `object_count` 从 `object_records` 聚合。
 
-契约见 `openapi.yaml`。无 `DATABASE_URL` 时 healthz 仍可用，鉴权接口返回 503。
+无 `DATABASE_URL` 时 healthz 仍可用，鉴权接口返回 503。
 
 ## 许可
 
