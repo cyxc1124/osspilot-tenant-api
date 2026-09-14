@@ -10,7 +10,7 @@ require (
 	github.com/aws/smithy-go v1.27.7
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/hibiken/asynq v0.26.0
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pressly/goose/v3 v3.27.3
 	golang.org/x/crypto v0.55.0
 )
